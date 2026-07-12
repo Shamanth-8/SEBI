@@ -3,14 +3,14 @@ Streamlit dashboard for RegGraph - Interactive obligation graph visualization.
 """
 import streamlit as st
 import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 from datetime import datetime
 import httpx
 import json
+import re
+import io
 from typing import Dict, List
 
-# Page configuration
 st.set_page_config(
     page_title="RegGraph - Regulatory Obligation Dashboard",
     page_icon="📊",
@@ -18,58 +18,51 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# API configuration
 API_BASE_URL = "http://localhost:8000/api/v1"
 
-# Initialize session state
 if 'current_intermediary' not in st.session_state:
     st.session_state.current_intermediary = 'stockbroker'
 
 
 def get_api_data(endpoint: str) -> Dict:
-    """Fetch data from RegGraph API."""
     try:
         response = httpx.get(f"{API_BASE_URL}{endpoint}", timeout=30.0)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"API error: {str(e)}")
         return {}
 
 
 def main():
-    """Main dashboard application."""
-    
-    # Header
-    st.title("📊 RegGraph - Regulatory Obligation Dashboard")
-    st.markdown("**Real-time SEBI regulatory compliance tracking through obligation graphs**")
-    
-    # Sidebar navigation
+    st.title("📊 RegGraph — SEBI Regulatory Compliance")
+    st.caption("Agentic pipeline: circular PDF → obligations → impact analysis → compliance action items")
+
     st.sidebar.header("Navigation")
     page = st.sidebar.radio(
         "Select View",
         [
+            "📤 Upload Circular",
             "📈 Dashboard Overview",
             "🔍 Search Obligations",
             "📋 Compliance Mapping",
             "🌐 Graph Analysis",
             "⚠️ Evidence Gaps",
             "🔗 Impact Analysis",
-            "📤 Upload Circular"
         ]
     )
-    
-    # Intermediary selector
+
     st.sidebar.markdown("---")
     intermediary_type = st.sidebar.selectbox(
         "Intermediary Type",
-        ["stockbroker", "rta", "investment_adviser"],
+        ["stockbroker", "depository", "listed_company", "investment_adviser", "fiduciary", "rta"],
         key="intermediary_selector"
     )
     st.session_state.current_intermediary = intermediary_type
-    
-    # Page content
-    if page == "📈 Dashboard Overview":
+
+    if page == "📤 Upload Circular":
+        show_upload_circular()
+    elif page == "📈 Dashboard Overview":
         show_dashboard_overview(intermediary_type)
     elif page == "🔍 Search Obligations":
         show_search_obligations()
@@ -81,491 +74,389 @@ def main():
         show_evidence_gaps(intermediary_type)
     elif page == "🔗 Impact Analysis":
         show_impact_analysis()
-    elif page == "📤 Upload Circular":
-        show_upload_circular()
 
 
-def show_dashboard_overview(intermediary_type: str):
-    """Dashboard overview with key metrics."""
-    st.header("📊 Compliance Dashboard Overview")
-    
-    # Fetch statistics
-    stats = get_api_data("/graph/statistics")
-    
-    if stats:
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Obligations", stats.get('total_obligations', 0))
-        with col2:
-            st.metric("Active Obligations", stats.get('active_obligations', 0))
-        with col3:
-            st.metric("High Severity", stats.get('high_severity_count', 0))
-        with col4:
-            st.metric("Circulars Ingested", stats.get('circulars_ingested', 0))
-        
-        st.markdown("---")
-        
-        # Evidence gaps visualization
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            evidence_data = stats.get('evidence_gaps', {})
-            fig = go.Figure(data=[
-                go.Bar(
-                    x=['Complete', 'Partial', 'Missing'],
-                    y=[
-                        evidence_data.get('complete', 0),
-                        evidence_data.get('partial', 0),
-                        evidence_data.get('missing', 0)
-                    ],
-                    marker=dict(color=['#2ecc71', '#f39c12', '#e74c3c'])
-                )
-            ])
-            fig.update_layout(title="Evidence Status Distribution", xaxis_title="Status", yaxis_title="Count")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Obligation status breakdown
-            fig = go.Figure(data=[
-                go.Pie(
-                    labels=['Active', 'Superseded'],
-                    values=[stats.get('active_obligations', 0), stats.get('superseded_obligations', 0)],
-                    marker=dict(colors=['#3498db', '#95a5a6'])
-                )
-            ])
-            fig.update_layout(title="Obligation Status")
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No data available. Please upload a circular first.")
+# ─────────────────────────────────────────────────────────────────────────────
+# UPLOAD PAGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_pdf_text(file_bytes: bytes) -> str:
+    import pdfplumber
+    text = ""
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        for page in pdf.pages:
+            t = page.extract_text()
+            if t:
+                text += t + "\n"
+    return text
 
 
-def show_search_obligations():
-    """Search and filter obligations."""
-    st.header("🔍 Search Obligations")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        search_query = st.text_input("Search by keywords, title, or description")
-    with col2:
-        search_semantic = st.checkbox("Semantic Search", value=True)
-    
-    if search_query:
-        params = f"/obligations/search?query={search_query}&semantic={search_semantic}"
-        results = get_api_data(params)
-        
-        if results.get('results'):
-            st.success(f"Found {results.get('results_count', 0)} results")
-            
-            # Display results as expandable cards
-            for obl in results['results']:
-                with st.expander(f"📌 {obl['title']} ({obl['severity'].upper()})"):
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        st.write(f"**Description:** {obl['description']}")
-                        st.write(f"**Responsible Party:** {obl['responsible_party']}")
-                        st.write(f"**Action:** {obl['required_action']}")
-                    with col2:
-                        st.write(f"**Status:** {obl['status']}")
-                        st.write(f"**Deadline:** {obl['deadline'] or 'TBD'}")
-                    
-                    st.button("View Details", key=f"btn_{obl['id']}")
-        else:
-            st.info("No obligations found matching your search.")
+def _parse_metadata(text: str):
+    """Auto-detect circular ID and title from text."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
 
+    # Reference number — e.g. HO/43/15/12(3)2025-ISD-POD2/I/11734/2026
+    ref_re = re.compile(
+        r'(?:SEBI[/\s])?(?:HO|CIR|ISD|MIRSD|IMD|OIAE|MRD|CFD|ERO)[/\-][A-Z0-9/\-\(\)\.]{5,60}',
+        re.IGNORECASE
+    )
+    circular_id = ""
+    for line in lines[:15]:
+        m = ref_re.search(line)
+        if m:
+            raw = m.group(0).strip()
+            circular_id = re.sub(r'[^A-Za-z0-9_\-]', '_', raw)[:60]
+            break
+    if not circular_id:
+        circular_id = f"SEBI_CIRCULAR_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-def show_compliance_mapping(intermediary_type: str):
-    """Show compliance mapping for intermediary."""
-    st.header(f"📋 Compliance Mapping - {intermediary_type.upper()}")
-    
-    mapping = get_api_data(f"/compliance/mapping/{intermediary_type}")
-    
-    if mapping:
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "Applicable Obligations",
-                mapping.get('applicable_obligations_count', 0)
-            )
-        with col2:
-            st.metric(
-                "Not Applicable",
-                mapping.get('not_applicable_count', 0)
-            )
-        with col3:
-            st.metric(
-                "Critical Gaps",
-                mapping.get('critical_gaps_count', 0)
-            )
-        
-        st.markdown("---")
-        
-        # Action items
-        st.subheader("Priority Action Items")
-        
-        action_items = mapping.get('action_items', [])
-        if action_items:
-            df_actions = pd.DataFrame([
-                {
-                    'Priority': item.get('priority', 'normal').upper(),
-                    'Responsible': item.get('responsible_party', 'TBD'),
-                    'Action': item.get('action', '')[:50] + '...',
-                    'Deadline': item.get('deadline', 'TBD'),
-                    'Effort': item.get('estimated_effort', 'medium')
-                }
-                for item in action_items[:10]
-            ])
-            
-            st.dataframe(df_actions, use_container_width=True)
-        else:
-            st.info("No action items available.")
+    # Title — "Sub:" line or second non-empty line
+    title = ""
+    for line in lines[:25]:
+        if line.lower().startswith("sub:"):
+            title = line[4:].strip()
+            break
+    if not title and len(lines) > 1:
+        title = lines[1]
 
-
-def show_graph_analysis():
-    """Graph structure and dependency analysis."""
-    st.header("🌐 Graph Analysis")
-    
-    stats = get_api_data("/graph/statistics")
-    
-    if stats:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric("Total Nodes", stats.get('total_nodes', 0))
-            st.metric("Total Edges", stats.get('total_edges', 0))
-        with col2:
-            st.metric("Network Density", f"{stats.get('network_density', 0):.3f}")
-        
-        st.markdown("---")
-        
-        # Search for dependency analysis
-        obligation_id = st.text_input("Enter Obligation ID for dependency analysis")
-        
-        if obligation_id:
-            deps = get_api_data(f"/graph/dependencies/{obligation_id}")
-            
-            if deps:
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Direct Dependencies", deps.get('dependency_count', 0))
-                with col2:
-                    st.metric("Direct Dependents", deps.get('dependent_count', 0))
-                with col3:
-                    st.metric("Transitive Dependents", deps.get('transitive_dependent_count', 0))
-                
-                # Display dependency chain
-                st.subheader("Dependency Chain")
-                
-                deps_list = deps.get('direct_dependencies', [])
-                if deps_list:
-                    st.write("**Depends on:**")
-                    for dep in deps_list[:5]:
-                        st.write(f"- {dep}")
-                else:
-                    st.write("No dependencies")
-                
-                dependents_list = deps.get('direct_dependents', [])
-                if dependents_list:
-                    st.write("**Required by:**")
-                    for dep in dependents_list[:5]:
-                        st.write(f"- {dep}")
-
-
-def show_evidence_gaps(intermediary_type: str):
-    """Evidence gap analysis with color coding."""
-    st.header("⚠️ Evidence Gaps Analysis")
-    
-    gaps = get_api_data(f"/compliance/evidence-gaps/{intermediary_type}")
-    
-    if gaps:
-        # Summary cards
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "✅ Complete",
-                gaps['complete'].get('count', 0),
-                delta_color="off"
-            )
-        with col2:
-            st.metric(
-                "⚠️ Partial",
-                gaps['partial'].get('count', 0),
-                delta_color="off"
-            )
-        with col3:
-            st.metric(
-                "❌ Missing",
-                gaps['missing'].get('count', 0),
-                delta_color="off"
-            )
-        
-        st.markdown("---")
-        
-        # Detailed gap breakdown
-        tab1, tab2, tab3 = st.tabs(["✅ Complete", "⚠️ Partial", "❌ Missing"])
-        
-        with tab1:
-            st.subheader("Complete Evidence")
-            for obl in gaps['complete'].get('obligations', []):
-                st.write(f"✅ {obl['title']}")
-        
-        with tab2:
-            st.subheader("Partial Evidence")
-            for obl in gaps['partial'].get('obligations', []):
-                st.write(f"⚠️ {obl['title']}")
-        
-        with tab3:
-            st.subheader("Missing Evidence (Priority)")
-            for obl in gaps['missing'].get('obligations', []):
-                severity_emoji = "🔴" if obl['severity'] == 'high' else "🟡"
-                st.write(f"{severity_emoji} {obl['title']}")
-
-
-def show_impact_analysis():
-    """Impact propagation analysis."""
-    st.header("🔗 Impact Analysis")
-    
-    obligation_id = st.text_input("Enter Obligation ID to analyze impact")
-    
-    if obligation_id:
-        impact = get_api_data(f"/graph/impact/{obligation_id}")
-        
-        if impact:
-            st.subheader(f"Impact Analysis for {obligation_id}")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Directly Affected",
-                    len(impact.get('directly_affected', []))
-                )
-            with col2:
-                st.metric(
-                    "Indirectly Affected",
-                    len(impact.get('indirectly_affected', []))
-                )
-            with col3:
-                total = (
-                    len(impact.get('directly_affected', [])) +
-                    len(impact.get('indirectly_affected', []))
-                )
-                st.metric("Total Affected", total)
-            
-            st.markdown("---")
-            
-            # Implementation effort
-            effort = impact.get('implementation_effort', {})
-            if effort:
-                st.subheader("Implementation Effort Estimate")
-                
-                effort_data = {
-                    'Effort Level': ['High', 'Medium', 'Low'],
-                    'Count': [
-                        effort.get('high_effort_count', 0),
-                        effort.get('medium_effort_count', 0),
-                        effort.get('low_effort_count', 0)
-                    ]
-                }
-                
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=effort_data['Effort Level'],
-                        y=effort_data['Count'],
-                        marker=dict(color=['#e74c3c', '#f39c12', '#2ecc71'])
-                    )
-                ])
-                fig.update_layout(title="Implementation Effort Distribution")
-                st.plotly_chart(fig, use_container_width=True)
+    return circular_id, title
 
 
 def show_upload_circular():
-    """Circular upload interface with real-time agent progress."""
-    st.header("📤 Upload New Regulatory Circular")
+    st.header("📤 Upload Regulatory Circular")
 
-    st.markdown("""
-    Upload a SEBI circular (PDF or TXT). The agentic pipeline will run automatically:
+    st.info(
+        "**How it works:** Drop your PDF → the system reads the Circular ID and Title "
+        "automatically → click **Run Agent Pipeline** → done."
+    )
 
-    | Step | Agent | What it does |
-    |------|-------|-------------|
-    | 1 | PDF Extractor | Parses PDF, splits into chunks |
-    | 2 | 🤖 Extraction Agent | Claude/Mistral reads each chunk, extracts obligations |
-    | 3 | 🔍 Diff Agent | Semantic comparison — NEW / MODIFIED / SUPERSEDED |
-    | 4 | 🌐 Impact Engine | BFS graph traversal — finds all affected obligations |
-    | 5 | 📋 Mapping Agent | Filters by intermediary, generates action items per role |
-    | 6 | 🔒 Audit Logger | Timestamps every step to audit_log.json |
-    """)
+    # ── file upload ──────────────────────────────────────────────────────────
+    uploaded_file = st.file_uploader(
+        "📎 Drop circular PDF here",
+        type=["pdf", "txt"],
+    )
+
+    doc_text   = ""
+    file_bytes = b""
+    filename   = ""
+    auto_id    = ""
+    auto_title = ""
+
+    if uploaded_file:
+        file_bytes = uploaded_file.read()
+        filename   = uploaded_file.name or ""
+
+        with st.spinner("Reading file..."):
+            if filename.lower().endswith(".pdf"):
+                doc_text = _extract_pdf_text(file_bytes)
+            else:
+                try:
+                    doc_text = file_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    doc_text = file_bytes.decode("latin-1")
+
+        auto_id, auto_title = _parse_metadata(doc_text)
+        st.success(f"✅ Read **{len(doc_text):,} characters** from `{filename}`")
+
+    else:
+        doc_text = st.text_area(
+            "Or paste circular text directly",
+            height=150,
+            placeholder="Paste the full text of the circular here..."
+        )
+        if doc_text.strip():
+            auto_id, auto_title = _parse_metadata(doc_text)
+
+    # ── editable fields (pre-filled) ─────────────────────────────────────────
+    col1, col2 = st.columns(2)
+    with col1:
+        circular_id = st.text_input("Circular ID", value=auto_id,
+                                    help="Auto-detected from PDF. Edit if needed.")
+    with col2:
+        circular_title = st.text_input("Title", value=auto_title,
+                                       help="Auto-detected from PDF. Edit if needed.")
+
+    intermediary_types = st.multiselect(
+        "Intermediary types",
+        ["stockbroker", "depository", "listed_company", "investment_adviser", "fiduciary", "rta"],
+        default=["stockbroker", "depository", "listed_company"],
+        help="Leave as default if unsure — applies to all common SEBI intermediaries"
+    )
 
     st.markdown("---")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        circular_id    = st.text_input("Circular ID", placeholder="SEBI_CIRCULAR_2026_001")
-        circular_title = st.text_input("Circular Title", placeholder="Master Circular on Surveillance")
-    with col2:
-        intermediary_types = st.multiselect(
-            "Applicable Intermediary Types",
-            ["stockbroker", "depository", "listed_company", "investment_adviser", "fiduciary", "rta"],
-            default=["stockbroker", "depository"]
-        )
+    can_run = bool(doc_text.strip()) and bool(circular_id.strip())
+    if st.button("🚀 Run Agent Pipeline", type="primary", disabled=not can_run):
+        _run_pipeline(circular_id, circular_title, doc_text,
+                      file_bytes, filename, intermediary_types)
 
-    uploaded_file = st.file_uploader(
-        "Upload circular document (PDF or TXT)",
-        type=["txt", "pdf"]
-    )
-    circular_text = st.text_area(
-        "Or paste circular text directly",
-        height=200,
-        placeholder="Paste the full text of the circular here..."
-    )
 
-    if st.button("🚀 Run Agent Pipeline", type="primary"):
-        if not circular_id or not circular_title:
-            st.error("Please provide Circular ID and Title")
-            return
-        if not (uploaded_file or circular_text.strip()):
-            st.error("Please provide a circular document or paste text")
-            return
+def _run_pipeline(circular_id, circular_title, doc_text,
+                  file_bytes, filename, intermediary_types):
+    """Execute pipeline with live step display."""
 
-        # ── show live agent steps ──────────────────────────────────────
-        st.markdown("---")
-        st.subheader("⚙️ Agent Pipeline Running...")
+    steps = [
+        ("📄", "Extracting & chunking circular text"),
+        ("🤖", "Extraction Agent — LLM reads each chunk, finds obligations"),
+        ("🔍", "Diff Agent — classifies NEW / MODIFIED / SUPERSEDED"),
+        ("🌐", "Impact Engine — BFS graph traversal for dependencies"),
+        ("📋", "Mapping Agent — action items per intermediary type"),
+        ("🔒", "Saving graph · updating audit log · recording metrics"),
+    ]
 
-        step_area = st.empty()
+    box = st.empty()
 
-        steps = [
-            ("📄", "Step 1", "Extracting text from document..."),
-            ("🤖", "Step 2", "Extraction Agent — Claude/Mistral reading circular chunks..."),
-            ("🔍", "Step 3", "Diff Agent — comparing against existing obligations..."),
-            ("🌐", "Step 4", "Impact Engine — BFS graph traversal for dependencies..."),
-            ("📋", "Step 5", "Mapping Agent — generating action items per intermediary..."),
-            ("🔒", "Step 6", "Saving graph, updating audit log and metrics..."),
-        ]
-
-        logs = []
-
-        def render_steps(done_up_to, result=None, error=None):
-            md = ""
-            for i, (icon, name, desc) in enumerate(steps):
-                if i < done_up_to:
-                    md += f"✅ **{name}** — {desc}\n\n"
-                elif i == done_up_to:
-                    md += f"⏳ **{name}** — {desc}\n\n"
-                else:
-                    md += f"⬜ {name} — {desc}\n\n"
-            if error:
-                md += f"\n❌ **Error:** {error}"
-            if result:
-                md += f"\n\n✅ **Pipeline complete!**"
-            step_area.markdown(md)
-
-        render_steps(0)
-
-        try:
-            import time
-
-            # Step 1 — read file
-            render_steps(0)
-            if uploaded_file:
-                file_bytes = uploaded_file.read()
-                filename = uploaded_file.name or ""
-                if filename.lower().endswith(".pdf"):
-                    # send as multipart to upload-file endpoint which uses pdfplumber
-                    render_steps(1)
-                    with st.spinner("Extracting PDF text..."):
-                        resp = httpx.post(
-                            f"{API_BASE_URL}/circulars/upload-file",
-                            data={
-                                "circular_id": circular_id,
-                                "title": circular_title,
-                                "intermediary_types": ",".join(intermediary_types)
-                            },
-                            files={"file": (filename, file_bytes, "application/pdf")},
-                            timeout=600.0
-                        )
-                    render_steps(6, result=True)
-                    result = resp.json()
-                else:
-                    try:
-                        doc_text = file_bytes.decode("utf-8")
-                    except UnicodeDecodeError:
-                        doc_text = file_bytes.decode("latin-1")
-                    render_steps(1)
-                    _run_text_pipeline(circular_id, circular_title, doc_text,
-                                       intermediary_types, render_steps, API_BASE_URL)
-                    resp = httpx.post(
-                        f"{API_BASE_URL}/circulars/upload",
-                        json={"circular_id": circular_id, "title": circular_title,
-                              "document_text": doc_text, "intermediary_types": intermediary_types},
-                        timeout=600.0
-                    )
-                    render_steps(6, result=True)
-                    result = resp.json()
+    def render(done: int, error: str = ""):
+        lines = []
+        for i, (icon, desc) in enumerate(steps):
+            if i < done:
+                lines.append(f"✅ &nbsp;{icon} **Step {i+1}** — {desc}")
+            elif i == done and not error:
+                lines.append(f"⏳ &nbsp;{icon} **Step {i+1}** — {desc} …")
             else:
-                render_steps(1)
-                resp = httpx.post(
-                    f"{API_BASE_URL}/circulars/upload",
-                    json={"circular_id": circular_id, "title": circular_title,
-                          "document_text": circular_text, "intermediary_types": intermediary_types},
-                    timeout=600.0
-                )
-                render_steps(6, result=True)
-                result = resp.json()
+                lines.append(f"⬜ &nbsp;Step {i+1} — {desc}")
+        if error:
+            lines.append(f"\n❌ **Error:** `{error}`")
+        box.markdown("\n\n".join(lines))
 
-            if resp.status_code != 200:
-                render_steps(6, error=resp.text)
-                st.error(f"Pipeline failed: {resp.text}")
-                return
+    render(0)
 
-            # ── results ───────────────────────────────────────────────
-            st.markdown("---")
-            st.subheader("📊 Pipeline Results")
-
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Obligations Extracted", result.get("extracted_obligations_count", 0))
-            c2.metric("NEW", result.get("new_obligations_count", 0))
-            c3.metric("MODIFIED", result.get("modified_obligations_count", 0))
-            c4.metric("SUPERSEDED", result.get("superseded_obligations_count", 0))
-
-            c1, c2 = st.columns(2)
-            c1.metric("Impact Score", f"{result.get('impact_score', 0):.2f}")
-            risk = result.get("risk_level", "medium")
-            emoji = "🔴" if risk == "high" else "🟡" if risk == "medium" else "🟢"
-            c2.write(f"**Risk Level:** {emoji} {risk.upper()}")
-
-            st.info("Go to **Dashboard Overview** or **Evidence Gaps** to see the extracted obligations.")
-
-            # Show audit trail for this circular
-            st.markdown("---")
-            st.subheader("🔒 Audit Trail")
-            audit_resp = httpx.get(
-                f"{API_BASE_URL}/audit/trail?circular_id={circular_id}", timeout=10
+    try:
+        # use multipart for PDFs (backend does pdfplumber), JSON for text
+        if file_bytes and filename.lower().endswith(".pdf"):
+            render(1)
+            resp = httpx.post(
+                f"{API_BASE_URL}/circulars/upload-file",
+                data={
+                    "circular_id":      circular_id,
+                    "title":            circular_title,
+                    "intermediary_types": ",".join(intermediary_types),
+                },
+                files={"file": (filename, file_bytes, "application/pdf")},
+                timeout=600.0,
             )
-            if audit_resp.status_code == 200:
-                entries = audit_resp.json().get("entries", [])
-                for e in entries:
-                    ts   = e.get("timestamp", "")[:19]
-                    evt  = e.get("event_type", "")
-                    det  = json.dumps(e.get("details", {}), default=str)
-                    icon = "✅" if e.get("status") == "success" else "❌"
-                    st.markdown(f"`{ts}` {icon} **{evt}** — {det}")
+        else:
+            render(1)
+            resp = httpx.post(
+                f"{API_BASE_URL}/circulars/upload",
+                json={
+                    "circular_id":      circular_id,
+                    "title":            circular_title,
+                    "document_text":    doc_text,
+                    "intermediary_types": intermediary_types,
+                },
+                timeout=600.0,
+            )
 
-        except Exception as exc:
-            render_steps(0, error=str(exc))
-            st.error(f"Error: {exc}")
+        if resp.status_code != 200:
+            render(0, error=resp.text[:300])
+            st.error(f"Pipeline error: {resp.text[:300]}")
+            return
+
+        render(6)
+        result = resp.json()
+
+        # ── results ───────────────────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("📊 Pipeline Results")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Obligations Extracted", result.get("extracted_obligations_count", 0))
+        c2.metric("🆕 NEW",                result.get("new_obligations_count", 0))
+        c3.metric("✏️ MODIFIED",           result.get("modified_obligations_count", 0))
+        c4.metric("🗑️ SUPERSEDED",         result.get("superseded_obligations_count", 0))
+
+        c1, c2 = st.columns(2)
+        c1.metric("Impact Score", f"{result.get('impact_score', 0):.2f}")
+        risk  = result.get("risk_level", "medium")
+        emoji = "🔴" if risk == "high" else "🟡" if risk == "medium" else "🟢"
+        c2.markdown(f"**Risk Level:** {emoji} **{risk.upper()}**")
+
+        st.success("✅ Done! Use the sidebar to explore **Dashboard Overview**, **Evidence Gaps**, or **Search Obligations**.")
+
+        with st.expander("🔒 Audit Trail for this run"):
+            ar = httpx.get(f"{API_BASE_URL}/audit/trail?circular_id={circular_id}", timeout=10)
+            if ar.status_code == 200:
+                for e in ar.json().get("entries", []):
+                    ts  = e.get("timestamp", "")[:19]
+                    evt = e.get("event_type", "")
+                    det = json.dumps(e.get("details", {}), default=str)
+                    ok  = "✅" if e.get("status") == "success" else "❌"
+                    st.markdown(f"`{ts}` {ok} **{evt}**  \n`{det}`")
+
+    except Exception as exc:
+        render(0, error=str(exc))
+        st.error(f"Error: {exc}")
 
 
-def _run_text_pipeline(circular_id, title, text, itypes, render_fn, base_url):
-    """Animate steps for text upload (we can't intercept mid-call, so we simulate)."""
-    import time
-    for i in range(1, 6):
-        render_fn(i)
-        time.sleep(0.3)
+# ─────────────────────────────────────────────────────────────────────────────
+# OTHER PAGES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def show_dashboard_overview(intermediary_type: str):
+    st.header("📈 Compliance Dashboard Overview")
+    stats = get_api_data("/graph/statistics")
+    if not stats or stats.get("total_obligations", 0) == 0:
+        st.warning("No obligations yet. Upload a circular first (📤 Upload Circular in sidebar).")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Obligations",  stats.get("total_obligations", 0))
+    c2.metric("Active",             stats.get("active_obligations", 0))
+    c3.metric("High Severity",      stats.get("high_severity_count", 0))
+    c4.metric("Circulars Ingested", stats.get("circulars_ingested", 0))
+
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        ev = stats.get("evidence_gaps", {})
+        fig = go.Figure(go.Bar(
+            x=["Complete", "Partial", "Missing"],
+            y=[ev.get("complete", 0), ev.get("partial", 0), ev.get("missing", 0)],
+            marker_color=["#2ecc71", "#f39c12", "#e74c3c"]
+        ))
+        fig.update_layout(title="Evidence Status", xaxis_title="Status", yaxis_title="Count")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        active = stats.get("active_obligations", 0)
+        sup    = stats.get("superseded_obligations", 0)
+        if active + sup > 0:
+            fig = go.Figure(go.Pie(
+                labels=["Active", "Superseded"],
+                values=[active, sup],
+                marker_colors=["#3498db", "#95a5a6"]
+            ))
+            fig.update_layout(title="Obligation Status")
+            st.plotly_chart(fig, use_container_width=True)
+
+
+def show_search_obligations():
+    st.header("🔍 Search Obligations")
+    query = st.text_input("Search (e.g. 'trading window', 'margin', 'insider trading')")
+    if query:
+        results = get_api_data(f"/obligations/search?query={query}&semantic=true")
+        items = results.get("results", [])
+        if items:
+            st.success(f"Found {len(items)} obligations")
+            for obl in items:
+                with st.expander(f"📌 {obl['title']} — {obl['severity'].upper()}"):
+                    st.write(f"**Description:** {obl['description']}")
+                    st.write(f"**Responsible:** {obl['responsible_party']}")
+                    st.write(f"**Action:** {obl['required_action']}")
+                    st.write(f"**Deadline:** {obl.get('deadline') or 'Not specified'}")
+                    st.caption(f"Clause: {obl.get('clause_reference','—')}")
+        else:
+            st.info("No results found.")
+
+
+def show_compliance_mapping(intermediary_type: str):
+    st.header(f"📋 Compliance Mapping — {intermediary_type.replace('_',' ').title()}")
+    mapping = get_api_data(f"/compliance/mapping/{intermediary_type}")
+    if not mapping:
+        st.info("No compliance data yet. Upload a circular first.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Applicable Obligations", mapping.get("applicable_obligations_count", 0))
+    c2.metric("Not Applicable",         mapping.get("not_applicable_count", 0))
+    c3.metric("Critical Gaps",          mapping.get("critical_gaps_count", 0))
+
+    st.markdown("---")
+    st.subheader("Priority Action Items")
+    items = mapping.get("action_items", [])
+    if items:
+        df = pd.DataFrame([{
+            "Priority":    item.get("priority", "normal").upper(),
+            "Responsible": item.get("responsible_party", "TBD"),
+            "Action":      item.get("action", "")[:60],
+            "Deadline":    item.get("deadline", "TBD"),
+        } for item in items[:15]])
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No action items.")
+
+
+def show_graph_analysis():
+    st.header("🌐 Graph Analysis")
+    stats = get_api_data("/graph/statistics")
+    if stats:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Nodes",   stats.get("total_nodes", 0))
+        c2.metric("Edges",   stats.get("total_edges", 0))
+        c3.metric("Density", f"{stats.get('network_density', 0):.3f}")
+
+    st.markdown("---")
+    obl_id = st.text_input("Enter Obligation ID to see its dependencies")
+    if obl_id:
+        deps = get_api_data(f"/graph/dependencies/{obl_id}")
+        if deps:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Direct Dependencies",  deps.get("dependency_count", 0))
+            c2.metric("Direct Dependents",    deps.get("dependent_count", 0))
+            c3.metric("Transitive Dependents",deps.get("transitive_dependent_count", 0))
+
+
+def show_evidence_gaps(intermediary_type: str):
+    st.header("⚠️ Evidence Gaps")
+
+    # Use the flat /evidence/gaps endpoint
+    data = get_api_data("/evidence/gaps")
+    if not data:
+        st.info("No evidence gap data. Upload a circular first.")
+        return
+
+    gaps = data.get("gaps", [])
+    total = data.get("total_gaps", len(gaps))
+
+    if not gaps:
+        st.success("No evidence gaps — all obligations have complete evidence!")
+        return
+
+    st.metric("Total gaps", total)
+    st.markdown("---")
+
+    for g in gaps:
+        sev   = g.get("severity", "medium")
+        ev    = g.get("evidence_status", "red")
+        icon  = "🔴" if ev == "red" else "🟡"
+        s_tag = "🔴 HIGH" if sev == "high" else "🟡 MEDIUM" if sev == "medium" else "🟢 LOW"
+        with st.expander(f"{icon} {g['title']} — {s_tag}"):
+            st.write(f"**Obligation ID:** `{g['obligation_id']}`")
+            st.write(f"**Circular:** {g['circular_id']}")
+            st.write(f"**Evidence needed:** {', '.join(g.get('evidence_requirements') or ['—'])}")
+            st.caption("Upload evidence via POST /api/v1/evidence/upload")
+
+
+def show_impact_analysis():
+    st.header("🔗 Impact Analysis")
+
+    # List available obligation IDs to make it easy
+    stats = get_api_data("/graph/statistics")
+    total = stats.get("total_obligations", 0) if stats else 0
+    if total == 0:
+        st.info("No obligations in graph yet. Upload a circular first.")
+        return
+
+    st.caption(f"{total} obligations in graph. Enter an ID below to trace its downstream impact.")
+    obl_id = st.text_input("Obligation ID", placeholder="e.g. SEBI_SURVEILLANCE_MC_2026_obl_0")
+
+    if obl_id:
+        impact = get_api_data(f"/graph/impact/{obl_id}")
+        if impact:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Directly Affected",   len(impact.get("directly_affected", [])))
+            c2.metric("Indirectly Affected",  len(impact.get("indirectly_affected", [])))
+            c3.metric("Total Affected",
+                      len(impact.get("directly_affected", [])) +
+                      len(impact.get("indirectly_affected", [])))
+
+            direct = impact.get("directly_affected", [])
+            if direct:
+                st.markdown("**Directly affected obligations:**")
+                for d in direct[:10]:
+                    st.markdown(f"- `{d}`")
 
 
 if __name__ == "__main__":
