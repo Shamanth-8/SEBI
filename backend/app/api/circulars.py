@@ -80,24 +80,44 @@ async def upload_circular_file(
     title: str = Form(...),
     intermediary_types: Optional[str] = Form(None)
 ) -> CircularResponse:
-    """Upload a circular as a file (PDF/TXT)."""
+    """Upload a circular as a file (PDF/TXT). PDFs are parsed with pdfplumber."""
     try:
         content = await file.read()
-        document_text = content.decode('utf-8')
-        
+        filename = file.filename or ""
+
+        if filename.lower().endswith(".pdf"):
+            # Use pdfplumber for PDF extraction
+            import pdfplumber, io
+            document_text = ""
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        document_text += t + "\n"
+            if not document_text.strip():
+                raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+        else:
+            # Try UTF-8 then fall back to latin-1 for plain text
+            try:
+                document_text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                document_text = content.decode("latin-1")
+
         intermediary_list = None
         if intermediary_types:
-            intermediary_list = intermediary_types.split(',')
-        
+            intermediary_list = [t.strip() for t in intermediary_types.split(",")]
+
         request = CircularUploadRequest(
             circular_id=circular_id,
             title=title,
             document_text=document_text,
             intermediary_types=intermediary_list
         )
-        
+
         return await upload_circular(request)
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))

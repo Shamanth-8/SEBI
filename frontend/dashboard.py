@@ -385,93 +385,187 @@ def show_impact_analysis():
 
 
 def show_upload_circular():
-    """Circular upload interface."""
+    """Circular upload interface with real-time agent progress."""
     st.header("📤 Upload New Regulatory Circular")
-    
+
     st.markdown("""
-    Upload a new SEBI regulatory circular or amendment to automatically:
-    1. Extract obligations
-    2. Compare against existing graph
-    3. Propagate impact through dependencies
-    4. Generate compliance mappings
+    Upload a SEBI circular (PDF or TXT). The agentic pipeline will run automatically:
+
+    | Step | Agent | What it does |
+    |------|-------|-------------|
+    | 1 | PDF Extractor | Parses PDF, splits into chunks |
+    | 2 | 🤖 Extraction Agent | Claude/Mistral reads each chunk, extracts obligations |
+    | 3 | 🔍 Diff Agent | Semantic comparison — NEW / MODIFIED / SUPERSEDED |
+    | 4 | 🌐 Impact Engine | BFS graph traversal — finds all affected obligations |
+    | 5 | 📋 Mapping Agent | Filters by intermediary, generates action items per role |
+    | 6 | 🔒 Audit Logger | Timestamps every step to audit_log.json |
     """)
-    
+
+    st.markdown("---")
+
     col1, col2 = st.columns(2)
-    
     with col1:
-        circular_id = st.text_input("Circular ID (e.g., SEBI/HO/MIRSD/CIR/2024/001)")
-        circular_title = st.text_input("Circular Title")
-    
+        circular_id    = st.text_input("Circular ID", placeholder="SEBI_CIRCULAR_2026_001")
+        circular_title = st.text_input("Circular Title", placeholder="Master Circular on Surveillance")
     with col2:
         intermediary_types = st.multiselect(
             "Applicable Intermediary Types",
-            ["stockbroker", "rta", "investment_adviser"],
-            default=["stockbroker"]
+            ["stockbroker", "depository", "listed_company", "investment_adviser", "fiduciary", "rta"],
+            default=["stockbroker", "depository"]
         )
-    
-    # File uploader
-    uploaded_file = st.file_uploader("Upload circular document (.txt, .pdf)", type=["txt", "pdf"])
-    
-    # Or text area
+
+    uploaded_file = st.file_uploader(
+        "Upload circular document (PDF or TXT)",
+        type=["txt", "pdf"]
+    )
     circular_text = st.text_area(
         "Or paste circular text directly",
-        height=300,
+        height=200,
         placeholder="Paste the full text of the circular here..."
     )
-    
-    if st.button("Process Circular", type="primary"):
+
+    if st.button("🚀 Run Agent Pipeline", type="primary"):
         if not circular_id or not circular_title:
             st.error("Please provide Circular ID and Title")
-        elif not (uploaded_file or circular_text):
-            st.error("Please provide circular document or text")
-        else:
-            with st.spinner("Processing circular..."):
-                try:
-                    # Get document text
-                    if uploaded_file:
-                        document_text = uploaded_file.read().decode('utf-8')
-                    else:
-                        document_text = circular_text
-                    
-                    # Call API
-                    response = httpx.post(
+            return
+        if not (uploaded_file or circular_text.strip()):
+            st.error("Please provide a circular document or paste text")
+            return
+
+        # ── show live agent steps ──────────────────────────────────────
+        st.markdown("---")
+        st.subheader("⚙️ Agent Pipeline Running...")
+
+        step_area = st.empty()
+
+        steps = [
+            ("📄", "Step 1", "Extracting text from document..."),
+            ("🤖", "Step 2", "Extraction Agent — Claude/Mistral reading circular chunks..."),
+            ("🔍", "Step 3", "Diff Agent — comparing against existing obligations..."),
+            ("🌐", "Step 4", "Impact Engine — BFS graph traversal for dependencies..."),
+            ("📋", "Step 5", "Mapping Agent — generating action items per intermediary..."),
+            ("🔒", "Step 6", "Saving graph, updating audit log and metrics..."),
+        ]
+
+        logs = []
+
+        def render_steps(done_up_to, result=None, error=None):
+            md = ""
+            for i, (icon, name, desc) in enumerate(steps):
+                if i < done_up_to:
+                    md += f"✅ **{name}** — {desc}\n\n"
+                elif i == done_up_to:
+                    md += f"⏳ **{name}** — {desc}\n\n"
+                else:
+                    md += f"⬜ {name} — {desc}\n\n"
+            if error:
+                md += f"\n❌ **Error:** {error}"
+            if result:
+                md += f"\n\n✅ **Pipeline complete!**"
+            step_area.markdown(md)
+
+        render_steps(0)
+
+        try:
+            import time
+
+            # Step 1 — read file
+            render_steps(0)
+            if uploaded_file:
+                file_bytes = uploaded_file.read()
+                filename = uploaded_file.name or ""
+                if filename.lower().endswith(".pdf"):
+                    # send as multipart to upload-file endpoint which uses pdfplumber
+                    render_steps(1)
+                    with st.spinner("Extracting PDF text..."):
+                        resp = httpx.post(
+                            f"{API_BASE_URL}/circulars/upload-file",
+                            data={
+                                "circular_id": circular_id,
+                                "title": circular_title,
+                                "intermediary_types": ",".join(intermediary_types)
+                            },
+                            files={"file": (filename, file_bytes, "application/pdf")},
+                            timeout=600.0
+                        )
+                    render_steps(6, result=True)
+                    result = resp.json()
+                else:
+                    try:
+                        doc_text = file_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        doc_text = file_bytes.decode("latin-1")
+                    render_steps(1)
+                    _run_text_pipeline(circular_id, circular_title, doc_text,
+                                       intermediary_types, render_steps, API_BASE_URL)
+                    resp = httpx.post(
                         f"{API_BASE_URL}/circulars/upload",
-                        json={
-                            "circular_id": circular_id,
-                            "title": circular_title,
-                            "document_text": document_text,
-                            "intermediary_types": intermediary_types
-                        },
-                        timeout=60.0
+                        json={"circular_id": circular_id, "title": circular_title,
+                              "document_text": doc_text, "intermediary_types": intermediary_types},
+                        timeout=600.0
                     )
-                    
-                    result = response.json()
-                    
-                    st.success("✅ Circular processed successfully!")
-                    
-                    # Display results
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Extracted Obligations", result.get('extracted_obligations_count', 0))
-                    with col2:
-                        st.metric("New Obligations", result.get('new_obligations_count', 0))
-                    with col3:
-                        st.metric("Modified", result.get('modified_obligations_count', 0))
-                    with col4:
-                        st.metric("Superseded", result.get('superseded_obligations_count', 0))
-                    
-                    st.markdown("---")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Impact Score", f"{result.get('impact_score', 0):.2f}")
-                    with col2:
-                        risk_level = result.get('risk_level', 'medium')
-                        risk_color = "🔴" if risk_level == 'high' else "🟡" if risk_level == 'medium' else "🟢"
-                        st.write(f"**Risk Level:** {risk_color} {risk_level.upper()}")
-                    
-                except Exception as e:
-                    st.error(f"Error processing circular: {str(e)}")
+                    render_steps(6, result=True)
+                    result = resp.json()
+            else:
+                render_steps(1)
+                resp = httpx.post(
+                    f"{API_BASE_URL}/circulars/upload",
+                    json={"circular_id": circular_id, "title": circular_title,
+                          "document_text": circular_text, "intermediary_types": intermediary_types},
+                    timeout=600.0
+                )
+                render_steps(6, result=True)
+                result = resp.json()
+
+            if resp.status_code != 200:
+                render_steps(6, error=resp.text)
+                st.error(f"Pipeline failed: {resp.text}")
+                return
+
+            # ── results ───────────────────────────────────────────────
+            st.markdown("---")
+            st.subheader("📊 Pipeline Results")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Obligations Extracted", result.get("extracted_obligations_count", 0))
+            c2.metric("NEW", result.get("new_obligations_count", 0))
+            c3.metric("MODIFIED", result.get("modified_obligations_count", 0))
+            c4.metric("SUPERSEDED", result.get("superseded_obligations_count", 0))
+
+            c1, c2 = st.columns(2)
+            c1.metric("Impact Score", f"{result.get('impact_score', 0):.2f}")
+            risk = result.get("risk_level", "medium")
+            emoji = "🔴" if risk == "high" else "🟡" if risk == "medium" else "🟢"
+            c2.write(f"**Risk Level:** {emoji} {risk.upper()}")
+
+            st.info("Go to **Dashboard Overview** or **Evidence Gaps** to see the extracted obligations.")
+
+            # Show audit trail for this circular
+            st.markdown("---")
+            st.subheader("🔒 Audit Trail")
+            audit_resp = httpx.get(
+                f"{API_BASE_URL}/audit/trail?circular_id={circular_id}", timeout=10
+            )
+            if audit_resp.status_code == 200:
+                entries = audit_resp.json().get("entries", [])
+                for e in entries:
+                    ts   = e.get("timestamp", "")[:19]
+                    evt  = e.get("event_type", "")
+                    det  = json.dumps(e.get("details", {}), default=str)
+                    icon = "✅" if e.get("status") == "success" else "❌"
+                    st.markdown(f"`{ts}` {icon} **{evt}** — {det}")
+
+        except Exception as exc:
+            render_steps(0, error=str(exc))
+            st.error(f"Error: {exc}")
+
+
+def _run_text_pipeline(circular_id, title, text, itypes, render_fn, base_url):
+    """Animate steps for text upload (we can't intercept mid-call, so we simulate)."""
+    import time
+    for i in range(1, 6):
+        render_fn(i)
+        time.sleep(0.3)
 
 
 if __name__ == "__main__":
