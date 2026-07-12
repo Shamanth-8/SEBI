@@ -9,8 +9,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from app.agents.orchestrator import RegGraphOrchestrator
-orchestrator = RegGraphOrchestrator()
+from app.api.circulars import orchestrator
 
 
 @router.get("/dashboard/{intermediary_type}")

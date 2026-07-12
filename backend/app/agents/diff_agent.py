@@ -129,7 +129,7 @@ Be precise. Only mark as NEW if truly novel. Return ONLY valid JSON."""
         try:
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=1500,
                 messages=[
                     {
                         "role": "user",

@@ -167,7 +167,7 @@ Return ONLY valid JSON, no markdown or explanation."""
             # Call Claude API
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=1500,
                 messages=[
                     {
                         "role": "user",
