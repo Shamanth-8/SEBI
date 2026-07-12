@@ -60,8 +60,11 @@ class ObligationExtractionAgent:
         all_obligations = []
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            # chunk is now a dict with "text" and "section_hint"
+            chunk_text = chunk["text"] if isinstance(chunk, dict) else chunk
+            section_hint = chunk.get("section_hint", "General") if isinstance(chunk, dict) else "General"
             obligations = self._extract_from_chunk(
-                chunk, circular_id, circular_title, intermediary_types
+                chunk_text, circular_id, circular_title, intermediary_types, section_hint
             )
             all_obligations.extend(obligations)
         
@@ -72,26 +75,44 @@ class ObligationExtractionAgent:
         logger.info(f"Successfully extracted {len(all_obligations)} obligations")
         return all_obligations
     
-    def _chunk_circular(self, text: str, chunk_size: int = 3000) -> List[str]:
+    def _chunk_circular(self, text: str, chunk_size: int = 3000) -> List[dict]:
         """
-        Split circular into logical chunks while respecting clause boundaries.
+        Split circular into logical chunks, preserving section/clause headings
+        so clause_reference can point to the actual source paragraph.
+
+        Returns list of dicts: {"text": str, "section_hint": str}
         """
-        # For now, use simple sentence-based chunking
-        # In production, would use more sophisticated document parsing
-        sentences = text.split(".")
+        import re
+        # Detect numbered headings like "2.", "2.1", "3.4.1", "A.", "PART I"
+        heading_re = re.compile(
+            r'(?m)^(?P<heading>'
+            r'(?:\d+\.)+\d*\s+[A-Z][^\n]{3,80}'   # 2.1 HEADING TEXT
+            r'|[A-Z][A-Z\s]{4,60}'                  # ALLCAPS HEADING
+            r'|(?:PART|CHAPTER|SECTION)\s+\w+'       # PART / CHAPTER / SECTION
+            r')'
+        )
+
+        lines = text.splitlines(keepends=True)
         chunks = []
-        current_chunk = ""
-        
-        for sentence in sentences:
-            if len(current_chunk) + len(sentence) > chunk_size and current_chunk:
-                chunks.append(current_chunk.strip())
-                current_chunk = sentence
+        current_text = ""
+        current_heading = "General"
+
+        for line in lines:
+            m = heading_re.match(line)
+            if m and len(current_text.strip()) > 200:
+                # Flush current chunk
+                chunks.append({"text": current_text.strip(), "section_hint": current_heading})
+                current_text = line
+                current_heading = m.group("heading").strip()
             else:
-                current_chunk += sentence + "."
-        
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        
+                current_text += line
+                if len(current_text) >= chunk_size:
+                    chunks.append({"text": current_text.strip(), "section_hint": current_heading})
+                    current_text = ""
+
+        if current_text.strip():
+            chunks.append({"text": current_text.strip(), "section_hint": current_heading})
+
         return chunks
     
     def _extract_from_chunk(
@@ -99,36 +120,38 @@ class ObligationExtractionAgent:
         chunk: str,
         circular_id: str,
         circular_title: str,
-        intermediary_types: List[str]
+        intermediary_types: List[str],
+        section_hint: str = "General"
     ) -> List[Obligation]:
         """Extract obligations from a single chunk using Claude."""
         
         extraction_prompt = f"""You are a regulatory compliance expert specializing in SEBI (Securities and Exchange Board of India) regulations.
 
-Analyze the following excerpt from the regulatory circular and extract ALL distinct obligations, requirements, or compliance tasks.
+Analyze the following excerpt from the regulatory circular "{circular_title}" (section: {section_hint}) and extract ALL distinct obligations, requirements, or compliance tasks.
 
 For each obligation, identify:
-1. Specific action required (verb + object)
-2. Who is responsible (compliance officer, board, risk committee, etc.)
-3. Deadline or frequency (if mentioned)
-4. Type of deadline (fixed date, recurring, within X days, etc.)
-5. Who must comply (intermediary types)
-6. Any conditions or exceptions
-7. Evidence needed to demonstrate compliance
-8. Related clauses or cross-references
+1. clause_reference: The EXACT sentence or clause number from the text that defines this obligation (e.g. "Clause 4(b): All stockbrokers shall...")
+2. Specific action required (verb + object)
+3. Who is responsible (compliance officer, board, risk committee, etc.)
+4. Deadline or frequency (if mentioned)
+5. Type of deadline (fixed date, recurring, within X days, etc.)
+6. Who must comply (intermediary types)
+7. Any conditions or exceptions
+8. Evidence needed to demonstrate compliance
 
-CIRCULAR EXCERPT:
+CIRCULAR EXCERPT (Section: {section_hint}):
 ---
 {chunk}
 ---
 
-Return a JSON array of obligations. Each obligation should have this structure:
+Return a JSON array of obligations. Each obligation MUST have this structure:
 {{
+  "clause_reference": "Exact quoted sentence or clause number from the text above that states this obligation",
   "title": "Brief title of obligation",
   "description": "Detailed description of what must be done",
   "responsible_party": "Who is responsible",
   "required_action": "Specific action",
-  "deadline": "Deadline if mentioned",
+  "deadline": "Deadline if mentioned or null",
   "deadline_type": "fixed/recurring/relative/not_specified",
   "intermediary_types": {json.dumps(intermediary_types)},
   "conditions": {{}},
@@ -175,7 +198,10 @@ Return ONLY valid JSON, no markdown or explanation."""
                 obligation = Obligation(
                     obligation_id=f"{circular_id}_obl_{len(obligations) + i}",
                     circular_id=circular_id,
-                    clause_reference=f"{circular_title} - Section",
+                    clause_reference=obl_data.get(
+                        "clause_reference",
+                        f"{circular_title} — {section_hint}"
+                    ),
                     title=obl_data.get("title", ""),
                     description=obl_data.get("description", ""),
                     responsible_party=obl_data.get("responsible_party", ""),
