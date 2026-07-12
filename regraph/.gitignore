@@ -1,0 +1,124 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+*.pyo
+*.pyd
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Data & Cache
+data/
+cache/
+*.pkl
+*.pickle
+*.db
+*.sqlite
+*.sqlite3
+faiss_index/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+temp/
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+._*
+
+# Node/npm (if frontend uses node)
+node_modules/
+npm-debug.log
+yarn-error.log
+.npm
+
+# Streamlit
+.streamlit/
+.streamlit/config.toml
+
+# FastAPI
+.fastapi/
+
+# Test results
+htmlcov/
+.pytest_cache/
+test-results/
+
+# IDE specific
+.vscode/settings.json
+.vscode/extensions.json
+
+# API Keys (security)
+.api_keys
+credentials.json
+
+# Build artifacts
+dist/
+build/
+*.whl
+
+# Local development
+local_config.py
+debug/
