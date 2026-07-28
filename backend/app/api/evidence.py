@@ -153,6 +153,62 @@ async def upload_evidence(
     )
 
 
+class ChecklistUpdateRequest(BaseModel):
+    item_id: str
+    completed: bool
+    completed_by: Optional[str] = "compliance_officer"
+    notes: Optional[str] = None
+
+
+@router.get("/checklist/{obligation_id}")
+async def get_evidence_checklist(obligation_id: str):
+    """Get the evidence checklist for an obligation with progress."""
+    obl = orchestrator.graph.get_obligation(obligation_id)
+    if not obl:
+        raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
+    from app.models.obligation import ChecklistItem
+    if not obl.evidence_checklist:
+        obl.evidence_checklist = [
+            ChecklistItem(item_id=f"chk_{i}", label=req)
+            for i, req in enumerate(obl.evidence_requirements)
+        ]
+        orchestrator.graph.save()
+    checklist = obl.evidence_checklist
+    total = len(checklist)
+    completed = sum(1 for c in checklist if c.completed)
+    return {"obligation_id": obligation_id, "title": obl.title,
+            "progress": f"{completed}/{total}",
+            "completion_pct": round((completed / total * 100) if total > 0 else 0, 1),
+            "checklist": [c.model_dump() for c in checklist]}
+
+
+@router.patch("/checklist/{obligation_id}")
+async def update_checklist_item(obligation_id: str, update: ChecklistUpdateRequest):
+    """Mark a checklist item as complete/incomplete."""
+    obl = orchestrator.graph.get_obligation(obligation_id)
+    if not obl:
+        raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
+    item = next((c for c in obl.evidence_checklist if c.item_id == update.item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Checklist item {update.item_id} not found")
+    item.completed = update.completed
+    item.completed_by = update.completed_by
+    item.completed_at = datetime.now() if update.completed else None
+    item.notes = update.notes
+    total = len(obl.evidence_checklist)
+    done = sum(1 for c in obl.evidence_checklist if c.completed)
+    if done == total and total > 0:
+        obl.evidence_status = EvidenceStatus.COMPLETE
+    elif done > 0:
+        obl.evidence_status = EvidenceStatus.PARTIAL
+    else:
+        obl.evidence_status = EvidenceStatus.MISSING
+    orchestrator.graph.save()
+    return {"obligation_id": obligation_id, "item_id": update.item_id,
+            "completed": update.completed, "evidence_status": obl.evidence_status.value,
+            "progress": f"{done}/{total}"}
+
+
 @router.get("/gaps")
 async def get_evidence_gaps(circular_id: Optional[str] = None):
     """List all obligations with missing or partial evidence."""

@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.api import circulars, obligations, compliance, graph
 from app.api import evidence as evidence_api
 from app.api import audit_api
+from app.api import extended as extended_api
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +37,7 @@ app.include_router(compliance.router, prefix="/api/v1/compliance", tags=["Compli
 app.include_router(graph.router, prefix="/api/v1/graph", tags=["Graph"])
 app.include_router(evidence_api.router, prefix="/api/v1/evidence", tags=["Evidence"])
 app.include_router(audit_api.router, prefix="/api/v1/audit", tags=["Audit"])
+app.include_router(extended_api.router, prefix="/api/v1", tags=["Extended"])
 
 
 @app.get("/health")

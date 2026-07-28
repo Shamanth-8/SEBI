@@ -13,6 +13,10 @@ from app.agents.extraction_agent import ObligationExtractionAgent
 from app.agents.diff_agent import SemanticDiffAgent
 from app.agents.impact_propagation import ImpactPropagationEngine
 from app.agents.mapping_agent import ComplianceMappingAgent
+from app.agents.action_agent import generate_compliance_actions
+from app.agents.risk_calculator import enrich_all
+from app.agents.sop_agent import generate_sop
+from app.agents.copilot_agent import generate_copilot_summary
 from app.graph.obligation_graph import ObligationGraph
 from app.retrieval.faiss_search import FAISSRetrieval
 from app.audit import log_event
@@ -40,6 +44,9 @@ class RegGraphOrchestrator:
         self.retrieval = FAISSRetrieval()
         
         logger.info("RegGraphOrchestrator initialized")
+        # Cache for post-pipeline data
+        self._compliance_actions: List = []
+        self._last_copilot_summary: Optional[Dict] = None
     
     def process_circular(
         self,
@@ -169,6 +176,45 @@ class RegGraphOrchestrator:
                 circular_id, diff_result, propagation, compliance_mappings
             )
 
+            # Step 6b: Operational Action Agent — generate executable tasks
+            logger.info("Step 6b: Generating compliance action tasks...")
+            all_actions = []
+            for itype in (intermediary_types or []):
+                tasks = generate_compliance_actions(new_obligations, itype)
+                all_actions.extend(tasks)
+            # deduplicate by obligation_id
+            seen_obl = set()
+            unique_actions = []
+            for a in all_actions:
+                if a.obligation_id not in seen_obl:
+                    seen_obl.add(a.obligation_id)
+                    unique_actions.append(a)
+            self._compliance_actions = unique_actions   # cache for API access
+
+            # Enrich SOPs on actions
+            obl_map = {o.obligation_id: o for o in new_obligations}
+            for action in unique_actions:
+                obl = obl_map.get(action.obligation_id)
+                if obl:
+                    action.steps = generate_sop(obl, use_llm=False)
+
+            # Step 6c: Risk scoring — update all nodes in graph
+            logger.info("Step 6c: Computing risk scores...")
+            enrich_all(self.graph)
+
+            # Step 6d: Compliance Copilot summary
+            compliance_scores = self._compute_compliance_scores(intermediary_types or [])
+            copilot_summary = generate_copilot_summary(
+                circular_id=circular_id,
+                circular_title=circular_title,
+                diff_result=diff_result,
+                compliance_mappings=compliance_mappings,
+                impact_propagation=propagation,
+                actions=unique_actions,
+                compliance_scores=compliance_scores,
+            )
+            self._last_copilot_summary = copilot_summary
+
             # Step 7: Save state
             logger.info("Step 7: Saving state...")
             self.graph.save()
@@ -216,6 +262,9 @@ class RegGraphOrchestrator:
                 'impact_propagation': propagation,
                 'compliance_mappings': compliance_mappings,
                 'impact_report': impact_report,
+                'compliance_actions': unique_actions,
+                'copilot_summary': copilot_summary,
+                'compliance_scores': compliance_scores,
                 'graph_stats': self.graph.get_statistics(),
                 'metrics': metrics_record,
             }
@@ -352,3 +401,91 @@ class RegGraphOrchestrator:
             'transitive_dependents': list(transitive_dependents),
             'dependency_count': len(list(transitive_dependents))
         }
+
+    def _compute_compliance_scores(self, intermediary_types: List[str]) -> Dict[str, float]:
+        """
+        Compute compliance score per intermediary type.
+        Score = % of obligations with complete evidence, weighted by severity.
+        """
+        scores = {}
+        all_obls = self.graph.get_all_obligations()
+
+        for itype in intermediary_types:
+            applicable = [o for o in all_obls if itype in o.intermediary_types]
+            if not applicable:
+                scores[itype] = 100.0
+                continue
+
+            total_weight = 0.0
+            complete_weight = 0.0
+            sev_weights = {"high": 3.0, "medium": 2.0, "low": 1.0}
+
+            for o in applicable:
+                w = sev_weights.get(o.severity, 1.0)
+                total_weight += w
+                if o.evidence_status.value == "green":
+                    complete_weight += w
+                elif o.evidence_status.value == "yellow":
+                    complete_weight += w * 0.5
+
+            scores[itype] = round((complete_weight / total_weight) * 100, 1) if total_weight > 0 else 100.0
+
+        if scores:
+            scores["overall"] = round(sum(scores.values()) / len(scores), 1)
+        return scores
+
+    def get_compliance_scores(self, intermediary_types: Optional[List[str]] = None) -> Dict[str, float]:
+        """Public accessor for compliance scores."""
+        if intermediary_types is None:
+            all_obls = self.graph.get_all_obligations()
+            intermediary_types = list(set(
+                itype for o in all_obls for itype in o.intermediary_types
+            ))
+        return self._compute_compliance_scores(intermediary_types)
+
+    def get_compliance_actions(self, intermediary_type: Optional[str] = None) -> List:
+        """Return cached compliance actions (populated after pipeline run)."""
+        if not hasattr(self, "_compliance_actions"):
+            return []
+        if intermediary_type:
+            return [a for a in self._compliance_actions
+                    if intermediary_type in a.title or True]  # filter by obligation later
+        return self._compliance_actions
+
+    def get_copilot_summary(self) -> Optional[Dict]:
+        """Return last copilot summary generated."""
+        return getattr(self, "_last_copilot_summary", None)
+
+    def get_urgency_queue(self, intermediary_type: Optional[str] = None) -> List[Dict]:
+        """
+        Return obligations sorted by risk score descending (Tier 2A).
+        Adds days_remaining computed from deadline.
+        """
+        from app.agents.action_agent import _compute_days_remaining
+        from app.agents.risk_calculator import compute_risk_score
+
+        all_obls = self.graph.get_all_obligations()
+        if intermediary_type:
+            all_obls = [o for o in all_obls if intermediary_type in o.intermediary_types]
+
+        queue = []
+        for o in all_obls:
+            dep_count = len(list(self.graph.graph.successors(o.obligation_id)))
+            score, label = compute_risk_score(o, dep_count)
+            days = _compute_days_remaining(o.deadline, o.deadline_type)
+            queue.append({
+                "obligation_id": o.obligation_id,
+                "title": o.title,
+                "severity": o.severity,
+                "evidence_status": o.evidence_status.value,
+                "risk_score": score,
+                "risk_label": label,
+                "deadline": o.deadline,
+                "days_remaining": days,
+                "overdue": (days is not None and days < 0),
+                "responsible_party": o.responsible_party,
+                "intermediary_types": o.intermediary_types,
+            })
+
+        queue.sort(key=lambda x: (-x["risk_score"], x["days_remaining"] or 9999))
+        return queue

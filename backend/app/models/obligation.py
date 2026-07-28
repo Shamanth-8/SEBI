@@ -7,6 +7,66 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 
+# ─── Evidence checklist ──────────────────────────────────────────────────────
+
+class ChecklistItem(BaseModel):
+    """Single evidence checklist item with completion state."""
+    item_id: str
+    label: str
+    completed: bool = False
+    completed_by: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+# ─── Compliance Action (Tier 1A) ─────────────────────────────────────────────
+
+class ComplianceAction(BaseModel):
+    """
+    Structured, executable compliance task derived from an obligation.
+    Transforms the flat required_action string into an assignable work item.
+    """
+    action_id: str                          # e.g. ACT-00032
+    obligation_id: str                      # source obligation
+    circular_id: str
+
+    # Assignment
+    department: str                         # Risk Management / Compliance / Trading Ops / Legal
+    owner: str                              # responsible role
+    priority: str = "medium"               # critical / high / medium / low  (derived from severity + deadline)
+
+    # Scheduling
+    due_date: Optional[str] = None          # ISO date or human string
+    days_remaining: Optional[int] = None    # computed from deadline
+    overdue: bool = False
+
+    # Task detail
+    title: str
+    description: str
+    steps: List[str] = Field(default_factory=list)  # numbered SOP steps
+    evidence_required: List[str] = Field(default_factory=list)
+
+    # Links
+    dependencies: List[str] = Field(default_factory=list)  # linked obligation/version IDs
+
+    # Metadata
+    created_at: datetime = Field(default_factory=datetime.now)
+    status: str = "open"                   # open / in_progress / completed / overdue
+
+
+# ─── Regulatory evolution (Tier 3B) ──────────────────────────────────────────
+
+class ObligationVersion(BaseModel):
+    """One entry in the version chain for an obligation."""
+    circular_id: str
+    circular_title: str
+    version: int
+    timestamp: datetime
+    changes: List[str] = Field(default_factory=list)   # what changed vs previous
+    clause_reference: str = ""
+    status: str = "active"
+
+
 class ObligationStatus(str, Enum):
     """Status of an obligation in the compliance graph."""
     ACTIVE = "active"
@@ -83,6 +143,21 @@ class Obligation(BaseModel):
     # Additional metadata
     keywords: List[str] = Field(default_factory=list, description="Searchable keywords")
     severity: str = Field(default="medium", description="Compliance severity: high, medium, low")
+
+    # ── Tier 1B: Risk score ──────────────────────────────────────────────────
+    risk_score: float = Field(default=0.0, description="0-100 composite risk score")
+    risk_label: str = Field(default="Low", description="Low / Medium / High")
+
+    # ── Tier 3C: Explainability ──────────────────────────────────────────────
+    extraction_rationale: Optional[str] = Field(None, description="Why this obligation was extracted")
+    confidence_score: float = Field(default=0.8, description="Extraction confidence 0-1")
+    mandatory_keywords: List[str] = Field(default_factory=list, description="Keywords that triggered extraction (shall, must, required)")
+
+    # ── Tier 3D: Evidence checklist ──────────────────────────────────────────
+    evidence_checklist: List[ChecklistItem] = Field(default_factory=list)
+
+    # ── Tier 3B: Regulatory evolution ────────────────────────────────────────
+    version_history: List["ObligationVersion"] = Field(default_factory=list)
 
 
 class CircularMetadata(BaseModel):

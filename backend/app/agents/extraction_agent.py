@@ -195,6 +195,35 @@ Return ONLY valid JSON, no markdown or explanation."""
             # Convert to Obligation objects
             obligations = []
             for i, obl_data in enumerate(obligations_data):
+                desc = obl_data.get("description", "")
+                kw_list = obl_data.get("keywords", [])
+
+                # ── Tier 3C: Explainability ───────────────────────────────
+                _mandatory_triggers = ["shall", "must", "required", "obliged",
+                                       "mandatory", "ensure", "maintain", "comply"]
+                found_mandatory = [
+                    kw for kw in _mandatory_triggers
+                    if kw in desc.lower() or kw in obl_data.get("required_action", "").lower()
+                ]
+                confidence = 0.95 if found_mandatory else 0.70
+                rationale = (
+                    f"Extracted from {section_hint}. "
+                    + (f"Contains mandatory language: {', '.join(found_mandatory[:3])}."
+                       if found_mandatory else "Identified as a compliance requirement.")
+                )
+
+                # ── Evidence checklist from evidence_requirements ──────────
+                from app.models.obligation import ChecklistItem
+                ev_reqs = obl_data.get("evidence_requirements", [])
+                checklist = [
+                    ChecklistItem(
+                        item_id=f"chk_{j}",
+                        label=req,
+                        completed=False,
+                    )
+                    for j, req in enumerate(ev_reqs)
+                ]
+
                 obligation = Obligation(
                     obligation_id=f"{circular_id}_obl_{len(obligations) + i}",
                     circular_id=circular_id,
@@ -203,18 +232,24 @@ Return ONLY valid JSON, no markdown or explanation."""
                         f"{circular_title} — {section_hint}"
                     ),
                     title=obl_data.get("title", ""),
-                    description=obl_data.get("description", ""),
+                    description=desc,
                     responsible_party=obl_data.get("responsible_party", ""),
                     required_action=obl_data.get("required_action", ""),
                     deadline=obl_data.get("deadline"),
                     deadline_type=obl_data.get("deadline_type", "not_specified"),
                     intermediary_types=obl_data.get("intermediary_types", intermediary_types),
                     conditions=obl_data.get("conditions", {}),
-                    evidence_requirements=obl_data.get("evidence_requirements", []),
+                    evidence_requirements=ev_reqs,
                     evidence_status=EvidenceStatus.MISSING,
-                    keywords=obl_data.get("keywords", []),
+                    keywords=kw_list,
                     severity=obl_data.get("severity", "medium"),
-                    status=ObligationStatus.ACTIVE
+                    status=ObligationStatus.ACTIVE,
+                    # explainability
+                    extraction_rationale=rationale,
+                    confidence_score=confidence,
+                    mandatory_keywords=found_mandatory,
+                    # checklist
+                    evidence_checklist=checklist,
                 )
                 obligations.append(obligation)
             
