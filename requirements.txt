@@ -17,3 +17,6 @@ plotly==5.24.1
 httpx==0.28.0
 python-multipart==0.0.20
 setuptools>=75.0.0
+streamlit-option-menu==0.3.13
+pyvis==0.3.2
+pdfplumber==0.11.4

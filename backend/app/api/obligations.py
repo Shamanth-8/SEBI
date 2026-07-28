@@ -50,6 +50,66 @@ async def search_obligations(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/urgency")
+async def get_urgency_queue(
+    intermediary_type: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Obligations sorted by composite risk score (highest = most urgent)."""
+    queue = orchestrator.get_urgency_queue(intermediary_type)
+    return {"total": len(queue), "intermediary_type": intermediary_type, "queue": queue[:limit]}
+
+
+@router.get("/{obligation_id}/sop")
+async def get_obligation_sop(
+    obligation_id: str,
+    use_llm: bool = Query(False),
+):
+    """Generate a numbered SOP for a specific obligation."""
+    obl = orchestrator.graph.get_obligation(obligation_id)
+    if not obl:
+        raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
+    from app.agents.sop_agent import generate_sop
+    steps = generate_sop(obl, use_llm=use_llm)
+    return {"obligation_id": obligation_id, "title": obl.title,
+            "clause_reference": obl.clause_reference, "sop_steps": steps,
+            "step_count": len(steps), "generated_by": "llm" if use_llm else "template"}
+
+
+@router.get("/{obligation_id}/explainability")
+async def get_obligation_explainability(obligation_id: str):
+    """Why was this obligation extracted?"""
+    obl = orchestrator.graph.get_obligation(obligation_id)
+    if not obl:
+        raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
+    return {"obligation_id": obligation_id, "title": obl.title,
+            "clause_reference": obl.clause_reference,
+            "extraction_rationale": obl.extraction_rationale or "Extracted as a compliance requirement.",
+            "confidence_score": obl.confidence_score,
+            "mandatory_keywords": obl.mandatory_keywords,
+            "severity": obl.severity, "intermediary_types": obl.intermediary_types}
+
+
+@router.get("/{obligation_id}/timeline")
+async def get_obligation_timeline(obligation_id: str):
+    """Regulatory evolution / version history for an obligation."""
+    obl = orchestrator.graph.get_obligation(obligation_id)
+    if not obl:
+        raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
+    history = obl.version_history if obl.version_history else []
+    current = {"version": obl.version, "circular_id": obl.circular_id,
+               "clause_reference": obl.clause_reference, "status": obl.status.value,
+               "changes": ["Initial extraction"] if obl.version == 1 else ["Updated"],
+               "timestamp": obl.updated_at.isoformat() if obl.updated_at else None}
+    timeline = [v.model_dump() if hasattr(v, "model_dump") else v for v in history]
+    if not any(e.get("version") == obl.version for e in timeline):
+        timeline.append(current)
+    return {"obligation_id": obligation_id, "title": obl.title,
+            "current_version": obl.version, "current_status": obl.status.value,
+            "superseded_by": obl.superseded_by or [], "supersedes": obl.supersedes or [],
+            "version_timeline": sorted(timeline, key=lambda e: e.get("version", 0))}
+
+
 @router.get("/{obligation_id}")
 async def get_obligation_details(obligation_id: str):
     """Get detailed information about a specific obligation."""
