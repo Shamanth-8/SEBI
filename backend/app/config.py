@@ -67,6 +67,28 @@ class Settings:
     ENABLE_GRAPH_VISUALIZATION: bool = os.getenv("ENABLE_GRAPH_VISUALIZATION", "true").lower() == "true"
     ENABLE_IMPACT_ANALYSIS: bool = os.getenv("ENABLE_IMPACT_ANALYSIS", "true").lower() == "true"
 
+    # ── Notification settings ────────────────────────────────────────────────
+    # Email (SMTP)
+    NOTIFY_EMAIL_TO: str   = os.getenv("NOTIFY_EMAIL_TO", "")          # recipient
+    NOTIFY_EMAIL_FROM: str = os.getenv("NOTIFY_EMAIL_FROM", "")        # sender address
+    SMTP_HOST: str         = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT: int         = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER: str         = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str     = os.getenv("SMTP_PASSWORD", "")
+    SMTP_USE_TLS: bool     = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+
+    # Slack / generic webhook
+    NOTIFY_WEBHOOK_URL: str = os.getenv("NOTIFY_WEBHOOK_URL", "")      # Slack webhook or any HTTP endpoint
+
+    # Alert thresholds
+    NOTIFY_DUE_SOON_DAYS: int = int(os.getenv("NOTIFY_DUE_SOON_DAYS", "7"))   # alert if due within N days
+    NOTIFY_MIN_SEVERITY: str  = os.getenv("NOTIFY_MIN_SEVERITY", "medium")    # low | medium | high
+
+    @property
+    def notifications_enabled(self) -> bool:
+        """True if at least one notification channel is configured."""
+        return bool(self.NOTIFY_EMAIL_TO or self.NOTIFY_WEBHOOK_URL)
+
 
 @lru_cache()
 def get_settings() -> Settings:

@@ -3,13 +3,12 @@ Obligation query and management endpoints.
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, List
-from app.agents.orchestrator import RegGraphOrchestrator
+from app.api.circulars import orchestrator
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-orchestrator = RegGraphOrchestrator()
 
 
 @router.get("/search")
@@ -63,17 +62,24 @@ async def get_urgency_queue(
 @router.get("/{obligation_id}/sop")
 async def get_obligation_sop(
     obligation_id: str,
-    use_llm: bool = Query(False),
+    use_llm: bool = Query(True),
+    intermediary_type: Optional[str] = Query(None),
 ):
-    """Generate a numbered SOP for a specific obligation."""
+    """Generate a numbered SOP for a specific obligation. Defaults to LLM-generated."""
     obl = orchestrator.graph.get_obligation(obligation_id)
     if not obl:
         raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
     from app.agents.sop_agent import generate_sop
-    steps = generate_sop(obl, use_llm=use_llm)
-    return {"obligation_id": obligation_id, "title": obl.title,
-            "clause_reference": obl.clause_reference, "sop_steps": steps,
-            "step_count": len(steps), "generated_by": "llm" if use_llm else "template"}
+    steps = generate_sop(obl, use_llm=use_llm, intermediary_type=intermediary_type)
+    return {
+        "obligation_id": obligation_id,
+        "title": obl.title,
+        "clause_reference": obl.clause_reference,
+        "sop_steps": steps,
+        "step_count": len(steps),
+        "generated_by": "llm" if use_llm else "template",
+        "intermediary_type": intermediary_type,
+    }
 
 
 @router.get("/{obligation_id}/explainability")

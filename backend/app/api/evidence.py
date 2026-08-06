@@ -37,29 +37,25 @@ def _save_index(entries: list) -> None:
         json.dump(entries, f, indent=2, default=str)
 
 
-def _keyword_match_score(evidence_text: str, evidence_requirements: List[str]) -> float:
-    """
-    Simple keyword overlap score between uploaded document text
-    and an obligation's evidence_requirements list.
-    Returns 0.0 – 1.0.
-    """
-    if not evidence_requirements:
-        return 0.0
-    text_lower = evidence_text.lower()
-    matched = sum(
-        1 for req in evidence_requirements
-        if any(word in text_lower for word in req.lower().split())
-    )
-    return round(matched / len(evidence_requirements), 2)
 
 
-class EvidenceMatchResult(BaseModel):
+class EvidenceRequirementDetail(BaseModel):
+    requirement: str
+    satisfied: bool
+    score: float
+    reasoning: str
+
+
+class EvidenceMatchResultV2(BaseModel):
     obligation_id: str
     obligation_title: str
-    match_score: float          # 0-1
-    evidence_status: str        # green / yellow / red
+    match_score: float
+    evidence_status: str
     matched_requirements: List[str]
     unmatched_requirements: List[str]
+    per_requirement: List[EvidenceRequirementDetail]
+    overall_reasoning: str
+    method: str  # "llm" or "keyword_fallback"
 
 
 @router.post("/upload")
@@ -69,9 +65,12 @@ async def upload_evidence(
     uploaded_by: str = Form(default="compliance_officer"),
 ):
     """
-    Upload an evidence document (PDF/TXT) and match it against an obligation's
-    evidence_requirements using keyword matching.
+    Upload an evidence document (PDF/TXT) and semantically match it against an
+    obligation's evidence_requirements using the LLM Evidence Agent.
+    Falls back to keyword matching if LLM is unavailable.
     """
+    from app.agents.evidence_agent import match_evidence
+
     obligation = orchestrator.graph.get_obligation(obligation_id)
     if not obligation:
         raise HTTPException(status_code=404, detail=f"Obligation {obligation_id} not found")
@@ -80,23 +79,27 @@ async def upload_evidence(
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
-        # PDF or binary — extract readable bytes
         text = content.decode("latin-1", errors="ignore")
 
-    # Match against evidence requirements
-    requirements = obligation.evidence_requirements or []
-    text_lower = text.lower()
-    matched = [r for r in requirements if any(w in text_lower for w in r.lower().split())]
-    unmatched = [r for r in requirements if r not in matched]
-    score = round(len(matched) / max(len(requirements), 1), 2)
+    # ── Semantic / LLM evidence matching ────────────────────────────────────
+    match_result = match_evidence(
+        document_text=text,
+        obligation_title=obligation.title,
+        obligation_description=obligation.description,
+        evidence_requirements=obligation.evidence_requirements or [],
+        clause_reference=obligation.clause_reference,
+    )
+
+    score    = match_result["overall_score"]
+    matched  = match_result["matched"]
+    unmatched = match_result["unmatched"]
+    per_req  = match_result["per_requirement"]
+    reasoning = match_result["overall_reasoning"]
+    method   = match_result["method"]
 
     # Determine new evidence status
-    if score >= 0.8:
-        new_status = EvidenceStatus.COMPLETE
-    elif score >= 0.4:
-        new_status = EvidenceStatus.PARTIAL
-    else:
-        new_status = EvidenceStatus.MISSING
+    status_map = {"green": EvidenceStatus.COMPLETE, "yellow": EvidenceStatus.PARTIAL, "red": EvidenceStatus.MISSING}
+    new_status = status_map.get(match_result["evidence_status"], EvidenceStatus.MISSING)
 
     # Persist evidence file
     os.makedirs(EVIDENCE_DIR, exist_ok=True)
@@ -104,16 +107,17 @@ async def upload_evidence(
     with open(save_path, "wb") as f:
         f.write(content)
 
-    # Update obligation status in graph
+    # Update obligation status and notes in graph
     node = orchestrator.graph.graph.nodes.get(obligation_id, {})
     if "obligation" in node:
         node["obligation"].evidence_status = new_status
         node["obligation"].evidence_notes = (
-            f"Evidence uploaded: {file.filename} | score={score} | "
-            f"matched={matched} | unmatched={unmatched}"
+            f"Evidence uploaded: {file.filename} | score={score:.2f} | "
+            f"method={method} | matched={len(matched)}/{len(matched)+len(unmatched)} | "
+            f"{reasoning[:200]}"
         )
 
-    # Update evidence index
+    # Update evidence index — store full reasoning for UI display
     index = _load_index()
     index.append({
         "obligation_id": obligation_id,
@@ -125,6 +129,9 @@ async def upload_evidence(
         "evidence_status": new_status.value,
         "matched_requirements": matched,
         "unmatched_requirements": unmatched,
+        "per_requirement": per_req,
+        "overall_reasoning": reasoning,
+        "method": method,
     })
     _save_index(index)
 
@@ -137,19 +144,23 @@ async def upload_evidence(
             "filename": file.filename,
             "match_score": score,
             "evidence_status": new_status.value,
+            "method": method,
         },
         actor=uploaded_by,
     )
 
     orchestrator.graph.save()
 
-    return EvidenceMatchResult(
+    return EvidenceMatchResultV2(
         obligation_id=obligation_id,
         obligation_title=obligation.title,
         match_score=score,
         evidence_status=new_status.value,
         matched_requirements=matched,
         unmatched_requirements=unmatched,
+        per_requirement=[EvidenceRequirementDetail(**r) for r in per_req],
+        overall_reasoning=reasoning,
+        method=method,
     )
 
 

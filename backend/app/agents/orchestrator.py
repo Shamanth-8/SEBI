@@ -191,12 +191,18 @@ class RegGraphOrchestrator:
                     unique_actions.append(a)
             self._compliance_actions = unique_actions   # cache for API access
 
-            # Enrich SOPs on actions
+            # Enrich SOPs on actions using LLM (with per-intermediary context)
             obl_map = {o.obligation_id: o for o in new_obligations}
+            # Determine primary intermediary type for SOP context
+            primary_intermediary = (intermediary_types or [None])[0]
             for action in unique_actions:
                 obl = obl_map.get(action.obligation_id)
                 if obl:
-                    action.steps = generate_sop(obl, use_llm=False)
+                    action.steps = generate_sop(
+                        obl,
+                        use_llm=True,
+                        intermediary_type=primary_intermediary,
+                    )
 
             # Step 6c: Risk scoring — update all nodes in graph
             logger.info("Step 6c: Computing risk scores...")

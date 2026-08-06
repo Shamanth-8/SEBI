@@ -21,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-API_BASE_URL = "http://localhost:8000/api/v1"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DESIGN SYSTEM — injected once at startup
@@ -223,6 +223,131 @@ button[kind="primary"]:hover { background: #6D28D9 !important; }
 .sidebar-brand { padding: 16px 0 8px 0; }
 .sidebar-logo  { font-size: 1.3rem; font-weight: 800; color: var(--accent-lt); }
 .sidebar-tag   { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════════════
+   ANIMATIONS
+   ══════════════════════════════════════════════════════════ */
+
+/* Slide-in from bottom — used for cards appearing after pipeline */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim-slide-up {
+  animation: slideUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Fade in */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.anim-fade-in { animation: fadeIn 0.5s ease both; }
+
+/* Success flash — green pulse on completion */
+@keyframes successPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+  60%  { box-shadow: 0 0 0 14px rgba(34,197,94,0); }
+  100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+}
+.anim-success {
+  animation: successPulse 1.1s ease 0.1s both;
+  border-color: var(--ev-green) !important;
+}
+
+/* Alert pulse — red pulse for overdue items */
+@keyframes alertPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+  60%  { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+.anim-alert { animation: alertPulse 1.4s ease infinite; }
+
+/* Spinning loader */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  display: inline-block;
+  width: 18px; height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-lt);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+/* KPI counter count-up shimmer */
+@keyframes countUp {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.kpi-val { animation: countUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* Step item stagger */
+.step-item:nth-child(1) { animation: slideUp 0.3s 0.0s both; }
+.step-item:nth-child(2) { animation: slideUp 0.3s 0.05s both; }
+.step-item:nth-child(3) { animation: slideUp 0.3s 0.10s both; }
+.step-item:nth-child(4) { animation: slideUp 0.3s 0.15s both; }
+.step-item:nth-child(5) { animation: slideUp 0.3s 0.20s both; }
+.step-item:nth-child(6) { animation: slideUp 0.3s 0.25s both; }
+
+/* Evidence requirement rows */
+@keyframes rowPop {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ev-req-row {
+  animation: rowPop 0.35s ease both;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.ev-req-row:nth-child(1) { animation-delay: 0.0s; }
+.ev-req-row:nth-child(2) { animation-delay: 0.05s; }
+.ev-req-row:nth-child(3) { animation-delay: 0.10s; }
+.ev-req-row:nth-child(4) { animation-delay: 0.15s; }
+.ev-req-row:nth-child(5) { animation-delay: 0.20s; }
+.ev-req-row.satisfied  { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.05); }
+.ev-req-row.unsatisfied{ border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.05); }
+
+/* SOP step list */
+.sop-step {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 8px 0;
+  animation: slideUp 0.3s ease both;
+}
+.sop-step:nth-child(1) { animation-delay: 0.00s; }
+.sop-step:nth-child(2) { animation-delay: 0.04s; }
+.sop-step:nth-child(3) { animation-delay: 0.08s; }
+.sop-step:nth-child(4) { animation-delay: 0.12s; }
+.sop-step:nth-child(5) { animation-delay: 0.16s; }
+.sop-step:nth-child(6) { animation-delay: 0.20s; }
+.sop-num {
+  min-width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(124,58,237,0.18); border: 1px solid rgba(124,58,237,0.4);
+  color: var(--accent-lt); font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.sop-text { font-size: 0.87rem; color: var(--text); line-height: 1.55; }
+
+/* LLM badge */
+.llm-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.35);
+  border-radius: 20px; padding: 2px 10px;
+  font-size: 0.72rem; font-weight: 600; color: var(--accent-lt);
+  letter-spacing: 0.3px;
+}
+.keyword-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.3);
+  border-radius: 20px; padding: 2px 10px;
+  font-size: 0.72rem; color: var(--muted);
+}
 </style>
 """
 
@@ -271,6 +396,78 @@ def risk_color(score: float) -> str:
 def progress_bar(pct: float, color: str = "") -> str:
     c = color or ("green" if pct >= 75 else "yellow" if pct >= 40 else "red")
     return f"""<div class="prog-bar-wrap"><div class="prog-bar-fill {c}" style="width:{pct:.0f}%"></div></div>"""
+
+
+def render_sop_steps(steps: list, generated_by: str = "template") -> str:
+    """Render animated SOP step list with numbered circles."""
+    badge = (
+        '<span class="llm-badge">✦ LLM Generated</span>'
+        if generated_by == "llm"
+        else '<span class="keyword-badge">⚙ Template</span>'
+    )
+    rows = ""
+    for i, step in enumerate(steps, 1):
+        # Strip "Step N —" prefix if present so we don't double-display
+        text = re.sub(r"^Step\s+\d+\s*[—\-:]\s*", "", str(step)).strip()
+        rows += f"""
+        <div class="sop-step">
+          <div class="sop-num">{i}</div>
+          <div class="sop-text">{text}</div>
+        </div>"""
+    return f"""
+<div class="anim-slide-up" style="margin-top:8px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="font-size:0.82rem;font-weight:600;color:var(--text)">Standard Operating Procedure</span>
+    {badge}
+  </div>
+  {rows}
+</div>"""
+
+
+def render_evidence_reasoning(per_requirement: list, overall_reasoning: str, method: str) -> str:
+    """Render per-requirement evidence match results with animated rows."""
+    method_badge = (
+        '<span class="llm-badge">✦ Semantic Match</span>'
+        if method == "llm"
+        else '<span class="keyword-badge">⚙ Keyword Match</span>'
+    )
+    rows = ""
+    for req in per_requirement:
+        satisfied = req.get("satisfied", False)
+        score     = req.get("score", 0.0)
+        reasoning = req.get("reasoning", "")
+        req_text  = req.get("requirement", "")
+        icon      = "✅" if satisfied else "❌"
+        cls       = "satisfied" if satisfied else "unsatisfied"
+        score_pct = int(score * 100)
+        score_color = "var(--ev-green)" if score >= 0.7 else "var(--ev-yellow)" if score >= 0.4 else "var(--ev-red)"
+        rows += f"""
+        <div class="ev-req-row {cls}">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <span style="font-size:0.85rem;font-weight:600">{icon} {req_text}</span>
+            <span style="font-size:0.78rem;font-weight:700;color:{score_color};white-space:nowrap">{score_pct}%</span>
+          </div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-top:4px">{reasoning}</div>
+        </div>"""
+
+    overall_html = ""
+    if overall_reasoning:
+        overall_html = f"""
+      <div style="margin-top:12px;padding:10px 14px;background:rgba(124,58,237,0.07);
+                  border-radius:8px;border:1px solid rgba(124,58,237,0.2)">
+        <span style="font-size:0.75rem;color:var(--accent-lt);font-weight:600">OVERALL ASSESSMENT</span><br>
+        <span style="font-size:0.82rem;color:var(--muted)">{overall_reasoning}</span>
+      </div>"""
+
+    return f"""
+<div class="anim-fade-in" style="margin-top:10px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <span style="font-size:0.82rem;font-weight:600;color:var(--text)">Evidence Analysis</span>
+    {method_badge}
+  </div>
+  {rows}
+  {overall_html}
+</div>"""
 
 def _extract_pdf_text(file_bytes: bytes) -> str:
     import pdfplumber
@@ -354,28 +551,73 @@ def show_upload_page():
         'diffs, and maps obligations automatically.</p>', unsafe_allow_html=True
     )
 
+    # ── Show last pipeline result if returning to this page ───────────────
+    if "last_pipeline" in st.session_state:
+        p = st.session_state["last_pipeline"]
+        st.markdown(f"""
+<div class="rg-card anim-fade-in" style="border-color:var(--accent);margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Last Run</span><br>
+      <span style="font-weight:600;color:var(--accent-lt)">{p.get("circular_title","—")[:70]}</span>
+      <span style="font-size:0.78rem;color:var(--muted);margin-left:8px">{p.get("ran_at","")}</span>
+    </div>
+    <div style="display:flex;gap:16px;font-size:0.85rem">
+      <span>📋 <b style="color:var(--accent-lt)">{p.get("n_extracted",0)}</b> extracted</span>
+      <span>🆕 <b style="color:var(--accent-lt)">{p.get("n_new",0)}</b> new</span>
+      <span>✏️ <b style="color:var(--medium)">{p.get("n_mod",0)}</b> modified</span>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+        with st.expander("📊 View full last run results"):
+            _show_pipeline_result(p)
+        st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
+
     uploaded_file = st.file_uploader("Drop circular PDF here", type=["pdf", "txt"])
 
-    doc_text = ""; file_bytes = b""; filename = ""; auto_id = ""; auto_title = ""
-
-    if uploaded_file:
-        file_bytes = uploaded_file.read()
-        filename   = uploaded_file.name or ""
+    # ── Persist file content in session_state across Streamlit rerenders ──
+    # st.file_uploader returns None after the first .read() on rerender,
+    # so we cache bytes + extracted text to avoid the button going disabled.
+    if uploaded_file is not None:
+        # New file uploaded — read and cache it
+        raw = uploaded_file.read()
+        fname = uploaded_file.name or ""
         with st.spinner("Reading file…"):
-            if filename.lower().endswith(".pdf"):
-                doc_text = _extract_pdf_text(file_bytes)
+            if fname.lower().endswith(".pdf"):
+                text = _extract_pdf_text(raw)
             else:
                 try:
-                    doc_text = file_bytes.decode("utf-8")
+                    text = raw.decode("utf-8")
                 except UnicodeDecodeError:
-                    doc_text = file_bytes.decode("latin-1")
-        auto_id, auto_title = _parse_metadata(doc_text)
-        st.success(f"✅ Read **{len(doc_text):,} characters** from `{filename}`")
-    else:
+                    text = raw.decode("latin-1")
+        st.session_state["upload_file_bytes"] = raw
+        st.session_state["upload_doc_text"]   = text
+        st.session_state["upload_filename"]   = fname
+        auto_id, auto_title = _parse_metadata(text)
+        st.session_state["upload_auto_id"]    = auto_id
+        st.session_state["upload_auto_title"] = auto_title
+        st.success(f"✅ Read **{len(text):,} characters** from `{fname}`")
+
+    # Restore from cache if file widget is empty (rerender after interaction)
+    file_bytes = st.session_state.get("upload_file_bytes", b"")
+    doc_text   = st.session_state.get("upload_doc_text",   "")
+    filename   = st.session_state.get("upload_filename",   "")
+    auto_id    = st.session_state.get("upload_auto_id",    "")
+    auto_title = st.session_state.get("upload_auto_title", "")
+
+    # If no file uploaded and no cache, show text area fallback
+    if not file_bytes:
         doc_text = st.text_area("Or paste circular text", height=120,
-                                placeholder="Paste full circular text here…")
+                                placeholder="Paste full circular text here…",
+                                value=doc_text)
         if doc_text.strip():
             auto_id, auto_title = _parse_metadata(doc_text)
+            st.session_state["upload_doc_text"]   = doc_text
+            st.session_state["upload_auto_id"]    = auto_id
+            st.session_state["upload_auto_title"] = auto_title
+    elif uploaded_file is None and file_bytes:
+        # Show cached file info (file widget cleared but we still have the bytes)
+        st.info(f"📄 Using cached: `{filename}` ({len(doc_text):,} chars) — ready to run.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -391,14 +633,22 @@ def show_upload_page():
 
     st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
     can_run = bool(doc_text.strip()) and bool(circular_id.strip())
-    if st.button("🚀 Run Agent Pipeline", type="primary", disabled=not can_run, use_container_width=True):
-        _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, intermediary_types)
+
+    col_run, col_clear = st.columns([4, 1])
+    with col_run:
+        if st.button("🚀 Run Agent Pipeline", type="primary", disabled=not can_run, use_container_width=True):
+            _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, intermediary_types)
+    with col_clear:
+        if st.button("🗑 Clear", use_container_width=True, disabled=not file_bytes):
+            for k in ["upload_file_bytes", "upload_doc_text", "upload_filename",
+                      "upload_auto_id", "upload_auto_title"]:
+                st.session_state.pop(k, None)
+            st.rerun()
 
 
 def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, intermediary_types):
     stat_slot  = st.empty()
     step_slot  = st.empty()
-
     step_results = [""] * len(PIPELINE_STEPS)
 
     def render(done: int, error: str = ""):
@@ -407,7 +657,6 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
             unsafe_allow_html=True
         )
 
-    # Live stat row above stepper
     stat_slot.markdown(
         '<div class="kpi-row">'
         '<div class="kpi-card"><div class="kpi-val">—</div><div class="kpi-lbl">Extracted</div></div>'
@@ -441,7 +690,7 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
             render(0, error=resp.text[:300])
             return
 
-        result = resp.json()
+        result      = resp.json()
         n_extracted = result.get("extracted_obligations_count", 0)
         n_new       = result.get("new_obligations_count", 0)
         n_mod       = result.get("modified_obligations_count", 0)
@@ -455,78 +704,107 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
         step_results[5] = "Graph saved · audit logged · metrics recorded"
         render(6)
 
-        # Update stat row
         stat_slot.markdown(
-            f'<div class="kpi-row">'
-            f'<div class="kpi-card accent"><div class="kpi-val">{n_extracted}</div><div class="kpi-lbl">Extracted</div></div>'
+            f'<div class="kpi-row anim-slide-up">'
+            f'<div class="kpi-card accent anim-success"><div class="kpi-val">{n_extracted}</div><div class="kpi-lbl">Extracted</div></div>'
             f'<div class="kpi-card"><div class="kpi-val" style="color:var(--accent-lt)">{n_new}</div><div class="kpi-lbl">NEW</div></div>'
             f'<div class="kpi-card"><div class="kpi-val" style="color:var(--medium)">{n_mod}</div><div class="kpi-lbl">MODIFIED</div></div>'
             f'<div class="kpi-card"><div class="kpi-val" style="color:var(--muted)">{n_sup}</div><div class="kpi-lbl">SUPERSEDED</div></div>'
             f'</div>', unsafe_allow_html=True
         )
-
         st.toast(f"✅ Pipeline complete — {n_extracted} obligations, {n_new} new, {n_mod} modified", icon="🏛")
 
-        # ── Compliance Copilot / Impact Simulator card ────────────────────
-        st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
-        st.markdown("### 🤖 Compliance Copilot Summary")
-
+        # ── Save everything to session_state so it survives page navigation ──
         copilot = api_get("/copilot/summary", timeout=10)
-        if not has_error(copilot) and copilot.get("summary"):
-            s = copilot["summary"]
-            affected = ", ".join(copilot.get("affected_intermediaries", []))
-            depts    = ", ".join(copilot.get("departments_impacted", []))
-            effort   = copilot.get("effort_estimate", {})
-            est_days = effort.get("estimated_implementation_days", "—")
+        st.session_state["last_pipeline"] = {
+            "circular_id":        circular_id,
+            "circular_title":     circular_title,
+            "filename":           filename,
+            "n_extracted":        n_extracted,
+            "n_new":              n_new,
+            "n_mod":              n_mod,
+            "n_sup":              n_sup,
+            "risk_level":         risk_level,
+            "intermediary_types": intermediary_types,
+            "copilot":            copilot if not has_error(copilot) else None,
+            "ran_at":             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
-            top3 = copilot.get("top_3_immediate_actions", [])
-            actions_html = ""
-            for a in top3:
-                pb = priority_badge(a.get("priority", "medium"))
-                days_txt = f"due in {a['days_remaining']}d" if a.get("days_remaining") is not None else a.get("due_date") or "—"
-                actions_html += f'<li style="margin:4px 0;">{pb} <b>{a["title"]}</b> — <span style="color:var(--muted)">{a["department"]} · {days_txt}</span></li>'
-
-            st.markdown(f"""
-<div class="copilot-card">
-  <div class="copilot-title">📋 What changed? What to do next?</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-    <div>
-      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px">AFFECTED INTERMEDIARIES</p>
-      <p>{affected or '—'}</p>
-      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px;margin-top:12px">DEPARTMENTS IMPACTED</p>
-      <p>{depts or '—'}</p>
-    </div>
-    <div>
-      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px">TASKS CREATED</p>
-      <p style="font-size:1.4rem;font-weight:700;color:var(--accent-lt)">{s.get("total_tasks_created","—")}</p>
-      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px;margin-top:8px">EST. IMPLEMENTATION</p>
-      <p style="font-size:1.1rem;font-weight:600">{est_days} days <span style="font-size:0.75rem;color:var(--muted)">(estimate)</span></p>
-    </div>
-  </div>
-  <p style="color:var(--muted);font-size:0.78rem;margin:12px 0 4px">TOP 3 IMMEDIATE ACTIONS</p>
-  <ul style="padding-left:16px;margin:0">{actions_html}</ul>
-</div>""", unsafe_allow_html=True)
-        else:
-            risk_icon = "🔴" if risk_level == "high" else "🟡" if risk_level == "medium" else "🟢"
-            st.info(f"{risk_icon} Risk level: **{risk_level.upper()}** · {n_extracted} obligations processed")
-
-        # audit expander
-        with st.expander("🔒 Audit trail for this run"):
-            ar = api_get(f"/audit/trail?circular_id={circular_id}", timeout=10)
-            for e in ar.get("entries", []):
-                ts  = e.get("timestamp","")[:19]
-                evt = e.get("event_type","")
-                ok  = "✅" if e.get("status") == "success" else "❌"
-                st.markdown(f'`{ts}` {ok} **{evt}**')
+        st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
+        _show_pipeline_result(st.session_state["last_pipeline"])
 
     except Exception as exc:
         render(0, error=str(exc))
 
 
+def _show_pipeline_result(p: dict):
+    """Render pipeline result card — called both inline and on return to Upload page."""
+    circular_id = p.get("circular_id", "")
+    n_extracted = p.get("n_extracted", 0)
+    risk_level  = p.get("risk_level", "medium")
+    copilot     = p.get("copilot")
+    ran_at      = p.get("ran_at", "")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PAGE: DASHBOARD OVERVIEW
-# ─────────────────────────────────────────────────────────────────────────────
+    st.markdown(f"### 🤖 Last Pipeline Run — {p.get('circular_title','—')} <span style='font-size:0.75rem;color:var(--muted);font-weight:400'>{ran_at}</span>", unsafe_allow_html=True)
+
+    # KPI row
+    n_new = p.get("n_new", 0); n_mod = p.get("n_mod", 0); n_sup = p.get("n_sup", 0)
+    risk_color = {"high":"var(--high)","medium":"var(--medium)","low":"var(--low)"}.get(risk_level,"var(--medium)")
+    st.markdown(f"""
+<div class="kpi-row anim-slide-up">
+  <div class="kpi-card accent"><div class="kpi-val">{n_extracted}</div><div class="kpi-lbl">Obligations Extracted</div></div>
+  <div class="kpi-card"><div class="kpi-val" style="color:var(--accent-lt)">{n_new}</div><div class="kpi-lbl">NEW</div></div>
+  <div class="kpi-card"><div class="kpi-val" style="color:var(--medium)">{n_mod}</div><div class="kpi-lbl">MODIFIED</div></div>
+  <div class="kpi-card"><div class="kpi-val" style="color:var(--muted)">{n_sup}</div><div class="kpi-lbl">SUPERSEDED</div></div>
+  <div class="kpi-card"><div class="kpi-val" style="color:{risk_color}">{risk_level.upper()}</div><div class="kpi-lbl">Risk Level</div></div>
+</div>""", unsafe_allow_html=True)
+
+    if copilot and copilot.get("summary"):
+        s        = copilot["summary"]
+        affected = ", ".join(copilot.get("affected_intermediaries", []))
+        depts    = ", ".join(copilot.get("departments_impacted", []))
+        effort   = copilot.get("effort_estimate", {})
+        est_days = effort.get("estimated_implementation_days", "—")
+        top3     = copilot.get("top_3_immediate_actions", [])
+        actions_html = ""
+        for a in top3:
+            pb = priority_badge(a.get("priority", "medium"))
+            days_txt = f"due in {a['days_remaining']}d" if a.get("days_remaining") is not None else a.get("due_date") or "—"
+            actions_html += f'<li style="margin:4px 0;">{pb} <b>{a["title"]}</b> — <span style="color:var(--muted)">{a["department"]} · {days_txt}</span></li>'
+
+        st.markdown(f"""
+<div class="copilot-card anim-fade-in">
+  <div class="copilot-title">📋 What changed? What to do next?</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;flex-wrap:wrap">
+    <div>
+      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px">AFFECTED INTERMEDIARIES</p>
+      <p style="font-size:0.88rem">{affected or '—'}</p>
+    </div>
+    <div>
+      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px">DEPARTMENTS IMPACTED</p>
+      <p style="font-size:0.88rem">{depts or '—'}</p>
+    </div>
+    <div>
+      <p style="color:var(--muted);font-size:0.78rem;margin-bottom:4px">TASKS CREATED</p>
+      <p style="font-size:1.4rem;font-weight:700;color:var(--accent-lt)">{s.get("total_tasks_created","—")}</p>
+      <p style="color:var(--muted);font-size:0.75rem">Est. {est_days} days implementation</p>
+    </div>
+  </div>
+  <p style="color:var(--muted);font-size:0.78rem;margin:12px 0 4px">TOP 3 IMMEDIATE ACTIONS</p>
+  <ul style="padding-left:16px;margin:0">{actions_html}</ul>
+</div>""", unsafe_allow_html=True)
+    else:
+        risk_icon = "🔴" if risk_level == "high" else "🟡" if risk_level == "medium" else "🟢"
+        st.info(f"{risk_icon} Risk level: **{risk_level.upper()}** · {n_extracted} obligations extracted and saved to graph.")
+
+    with st.expander("🔒 Audit trail for this run"):
+        ar = api_get(f"/audit/trail?circular_id={circular_id}", timeout=10)
+        for e in ar.get("entries", []):
+            ts  = e.get("timestamp","")[:19]
+            evt = e.get("event_type","")
+            ok  = "✅" if e.get("status") == "success" else "❌"
+            st.markdown(f'`{ts}` {ok} **{evt}**')
+
 
 def show_overview_page(intermediary_type: str):
     st.markdown("## 📈 Dashboard Overview")
@@ -751,12 +1029,13 @@ def _show_urgency_queue(intermediary_type: str):
   &nbsp;&nbsp;Keywords: <b style="color:var(--medium)">{", ".join(expl.get("mandatory_keywords",[])[:4]) or "—"}</b>
 </div>""", unsafe_allow_html=True)
 
-            # SOP
-            sop = api_get(f"/obligations/{item['obligation_id']}/sop", timeout=5)
+            # SOP — fetch LLM version with intermediary context
+            sop = api_get(f"/obligations/{item['obligation_id']}/sop?use_llm=true&intermediary_type={intermediary_type}", timeout=15)
             if not has_error(sop) and sop.get("sop_steps"):
-                st.markdown("**Standard Operating Procedure:**")
-                for step in sop["sop_steps"]:
-                    st.markdown(f"- {step}")
+                st.markdown(
+                    render_sop_steps(sop["sop_steps"], sop.get("generated_by", "template")),
+                    unsafe_allow_html=True,
+                )
 
             # Checklist progress
             chk = api_get(f"/evidence/checklist/{item['obligation_id']}", timeout=5)
@@ -1101,45 +1380,116 @@ def show_evidence_page(intermediary_type: str):
 
     data = api_get("/evidence/gaps", timeout=15)
     if has_error(data) or not data.get("gaps"):
-        st.markdown('<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">No evidence gaps — all obligations have complete evidence!</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="empty-state anim-fade-in"><div class="empty-icon">✅</div><div class="empty-text">No evidence gaps — all obligations have complete evidence!</div></div>', unsafe_allow_html=True)
         return
 
-    gaps = [g for g in data.get("gaps", []) if intermediary_type in g.get("obligation_id", "") or True]
+    gaps = data.get("gaps", [])
     missing = [g for g in gaps if g.get("evidence_status") == "red"]
     partial = [g for g in gaps if g.get("evidence_status") == "yellow"]
 
     st.markdown(f"""
-<div class="kpi-row">
+<div class="kpi-row anim-slide-up">
   <div class="kpi-card"><div class="kpi-val">{data.get("total_gaps",0)}</div><div class="kpi-lbl">Total Gaps</div></div>
   <div class="kpi-card"><div class="kpi-val high">{len(missing)}</div><div class="kpi-lbl">🔴 Missing</div></div>
   <div class="kpi-card"><div class="kpi-val" style="color:var(--medium)">{len(partial)}</div><div class="kpi-lbl">🟡 Partial</div></div>
 </div>""", unsafe_allow_html=True)
 
+    # ── Evidence upload panel ─────────────────────────────────────────────
+    with st.expander("📤 Upload Evidence Document", expanded=False):
+        st.caption("Upload a PDF or TXT document and match it semantically against an obligation.")
+        all_ids = [g["obligation_id"] for g in gaps]
+        selected_obl = st.selectbox("Select obligation", all_ids,
+                                    format_func=lambda x: next((g["title"] for g in gaps if g["obligation_id"]==x), x))
+        ev_file = st.file_uploader("Evidence document (PDF/TXT)", type=["pdf", "txt", "docx"],
+                                   key="evidence_upload")
+        uploader = st.text_input("Uploaded by", value="compliance_officer")
+
+        if st.button("🔍 Analyse & Match", type="primary", disabled=not ev_file):
+            with st.spinner("🤖 Running semantic evidence analysis…"):
+                import httpx as _httpx
+                try:
+                    ev_bytes = ev_file.read()
+                    resp = _httpx.post(
+                        f"{API_BASE_URL}/evidence/upload",
+                        data={"obligation_id": selected_obl, "uploaded_by": uploader},
+                        files={"file": (ev_file.name, ev_bytes, "application/octet-stream")},
+                        timeout=120.0,
+                    )
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        score_pct = int(result.get("match_score", 0) * 100)
+                        ev_st = result.get("evidence_status", "red")
+                        color = {"green": "var(--ev-green)", "yellow": "var(--ev-yellow)", "red": "var(--ev-red)"}.get(ev_st, "var(--ev-red)")
+                        pulse_class = "anim-success" if ev_st == "green" else ""
+                        st.markdown(f"""
+<div class="rg-card {pulse_class}" style="border-color:{color}">
+  <div style="font-size:1.5rem;font-weight:700;color:{color}">{score_pct}% Match</div>
+  <div style="font-size:0.82rem;color:var(--muted);margin:4px 0">{ev_badge(ev_st)} via {result.get("method","—")}</div>
+  {render_evidence_reasoning(result.get("per_requirement",[]), result.get("overall_reasoning",""), result.get("method","keyword_fallback"))}
+</div>""", unsafe_allow_html=True)
+                        st.toast(f"Evidence matched: {score_pct}% — {ev_st.upper()}", icon="🔍")
+                        st.rerun()
+                    else:
+                        st.error(f"Upload failed: {resp.text[:200]}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
+
+    # ── Gap list ──────────────────────────────────────────────────────────
     for g in gaps[:20]:
         ev  = g.get("evidence_status", "red")
         sev = g.get("severity", "medium")
+        pulse = ' anim-alert' if ev == 'red' and sev == 'high' else ''
+
         with st.expander(f"{'🔴' if ev=='red' else '🟡'} {g['title']} — {sev.upper()}"):
             reqs = g.get("evidence_requirements") or []
-            # Fetch checklist for this obligation
-            chk = api_get(f"/evidence/checklist/{g['obligation_id']}", timeout=5)
-            if not has_error(chk) and chk.get("checklist"):
-                pct  = chk.get("completion_pct", 0)
-                prog = chk.get("progress", "0/0")
-                st.markdown(f"**Evidence checklist** ({prog} — {pct:.0f}% complete)")
-                st.markdown(progress_bar(pct), unsafe_allow_html=True)
-                for ci in chk["checklist"]:
-                    icon = "✅" if ci["completed"] else "☐"
-                    st.markdown(f"{icon} {ci['label']}")
+
+            # Fetch latest evidence entry for this obligation (shows LLM reasoning)
+            ev_index = api_get(f"/evidence/list/{g['obligation_id']}", timeout=5)
+            latest_ev = None
+            if not has_error(ev_index) and ev_index.get("evidence"):
+                latest_ev = ev_index["evidence"][-1]  # most recent upload
+
+            if latest_ev and latest_ev.get("per_requirement"):
+                # Show LLM reasoning from the last upload
+                score_pct = int(latest_ev.get("match_score", 0) * 100)
+                ev_color = {"green": "var(--ev-green)", "yellow": "var(--ev-yellow)", "red": "var(--ev-red)"}.get(ev, "var(--ev-red)")
+                st.markdown(f"""
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+  <span style="font-size:1.1rem;font-weight:700;color:{ev_color}">{score_pct}%</span>
+  {ev_badge(ev)}
+  <span style="font-size:0.78rem;color:var(--muted)">Last upload: {latest_ev.get("filename","—")} · {str(latest_ev.get("uploaded_at",""))[:10]}</span>
+</div>""", unsafe_allow_html=True)
+                st.markdown(
+                    render_evidence_reasoning(
+                        latest_ev["per_requirement"],
+                        latest_ev.get("overall_reasoning", ""),
+                        latest_ev.get("method", "keyword_fallback"),
+                    ),
+                    unsafe_allow_html=True,
+                )
             else:
-                for req in reqs:
-                    st.markdown(f"☐ {req}")
+                # No evidence uploaded yet — show checklist
+                chk = api_get(f"/evidence/checklist/{g['obligation_id']}", timeout=5)
+                if not has_error(chk) and chk.get("checklist"):
+                    pct  = chk.get("completion_pct", 0)
+                    prog = chk.get("progress", "0/0")
+                    st.markdown(f"**Evidence checklist** ({prog} — {pct:.0f}% complete)")
+                    st.markdown(progress_bar(pct), unsafe_allow_html=True)
+                    for ci in chk["checklist"]:
+                        icon = "✅" if ci["completed"] else "☐"
+                        st.markdown(f"{icon} {ci['label']}")
+                else:
+                    for req in reqs:
+                        st.markdown(f"☐ {req}")
+                st.caption("Upload evidence above to run semantic analysis.")
 
             st.markdown(f"""
 <div class="obl-meta" style="margin-top:8px">
   <span>ID: <code style="font-size:0.75rem">{g['obligation_id']}</code></span>
-  <span>Circular: {g['circular_id']}</span>
+  <span>Circular: {g.get('circular_id','—')}</span>
 </div>""", unsafe_allow_html=True)
-            st.caption("Upload evidence via POST /api/v1/evidence/upload")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1149,6 +1499,88 @@ def show_evidence_page(intermediary_type: str):
 def show_actions_page(intermediary_type: str):
     st.markdown("## 🎯 Compliance Actions")
     st.markdown('<p class="muted">Structured, assignable work items generated from obligations. Sorted by priority + urgency.</p>', unsafe_allow_html=True)
+
+    # ── Notification panel ────────────────────────────────────────────────
+    notif_cfg = api_get("/notifications/config", timeout=5)
+    email_ok   = notif_cfg.get("email_configured", False) if not has_error(notif_cfg) else False
+    webhook_ok = notif_cfg.get("webhook_configured", False) if not has_error(notif_cfg) else False
+    channels_txt = " + ".join(filter(None, [
+        ("📧 Email" if email_ok else ""),
+        ("💬 Slack" if webhook_ok else ""),
+    ])) or "⚠ No channels configured"
+
+    with st.expander(f"🔔 Send Compliance Alert Digest  —  {channels_txt}", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            due_soon = st.number_input("Alert if due within (days)", min_value=1, max_value=90, value=7)
+        with c2:
+            min_sev = st.selectbox("Min severity", ["low", "medium", "high"], index=1)
+        with c3:
+            dry_run = st.checkbox("Dry run (preview only)", value=True)
+
+        col_prev, col_send = st.columns([1, 1])
+
+        with col_prev:
+            if st.button("👁 Preview alerts", use_container_width=True):
+                with st.spinner("Scanning obligations…"):
+                    preview = api_get(
+                        f"/notifications/preview?intermediary_type={intermediary_type}"
+                        f"&due_soon_days={due_soon}&min_severity={min_sev}",
+                        timeout=15,
+                    )
+                if has_error(preview):
+                    st.error(f"Preview failed: {preview.get('_error')}")
+                else:
+                    total = preview.get("total_alerts", 0)
+                    has_crit = preview.get("has_critical", False)
+                    crit_html = '<span style="color:var(--high);font-weight:700">⚠ CRITICAL</span> — ' if has_crit else ""
+                    st.markdown(f"""
+<div class="rg-card anim-fade-in" style="{'border-color:var(--high)' if has_crit else ''}">
+  <div style="font-size:1rem;font-weight:600;margin-bottom:8px">{crit_html}{total} alert(s) found</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:0.85rem">
+    <span>⚠ Overdue: <b style="color:var(--high)">{len(preview.get('overdue',[]))}</b></span>
+    <span>🔔 Due soon: <b style="color:var(--medium)">{len(preview.get('due_soon',[]))}</b></span>
+    <span>🆕 New HIGH: <b style="color:var(--accent-lt)">{len(preview.get('new_high',[]))}</b></span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        with col_send:
+            btn_label = "📤 Send Now" if not dry_run else "📋 Test (no send)"
+            if st.button(btn_label, type="primary", use_container_width=True):
+                with st.spinner("Sending notifications…" if not dry_run else "Running test…"):
+                    result = api_post("/notifications/send", {
+                        "intermediary_type": intermediary_type,
+                        "due_soon_days": due_soon,
+                        "min_severity": min_sev,
+                        "dry_run": dry_run,
+                    })
+                if has_error(result):
+                    st.error(f"Failed: {result.get('_error')}")
+                else:
+                    total = result.get("total_alerts", 0)
+                    email_sent   = result.get("email",   {}).get("sent", False)
+                    webhook_sent = result.get("webhook", {}).get("sent", False)
+                    email_err    = result.get("email",   {}).get("error", "")
+                    webhook_err  = result.get("webhook", {}).get("error", "")
+
+                    status_color = "var(--low)" if (email_sent or webhook_sent) else "var(--medium)"
+                    st.markdown(f"""
+<div class="rg-card anim-success" style="border-color:{status_color}">
+  <div style="font-size:0.95rem;font-weight:600;margin-bottom:8px">
+    {'✅ Sent' if not dry_run else '✅ Test complete'} — {total} alert(s)
+  </div>
+  <div style="font-size:0.82rem;display:flex;flex-direction:column;gap:4px">
+    <span>📧 Email: {'<b style="color:var(--low)">Sent ✓</b>' if email_sent else f'<span style="color:var(--muted)">{"Not configured" if not email_ok else email_err or "Not sent"}</span>'}</span>
+    <span>💬 Slack: {'<b style="color:var(--low)">Sent ✓</b>' if webhook_sent else f'<span style="color:var(--muted)">{"Not configured" if not webhook_ok else webhook_err or "Not sent"}</span>'}</span>
+  </div>
+  <div style="font-size:0.78rem;color:var(--muted);margin-top:6px">{result.get("summary","")}</div>
+</div>""", unsafe_allow_html=True)
+                    st.toast("Notifications sent!" if (email_sent or webhook_sent) else "Test complete", icon="🔔")
+
+        if not (email_ok or webhook_ok):
+            st.info("Configure `NOTIFY_EMAIL_TO`/`SMTP_USER` or `NOTIFY_WEBHOOK_URL` in your `.env` to enable sending.")
+
+    st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
 
     data = api_get(f"/actions?limit=100", timeout=10)
     if has_error(data) or not data.get("actions"):
@@ -1198,9 +1630,10 @@ def show_actions_page(intermediary_type: str):
 </div>""", unsafe_allow_html=True)
 
             if action.get("steps"):
-                st.markdown("**SOP Steps:**")
-                for step in action["steps"]:
-                    st.markdown(f"- {step}")
+                st.markdown(
+                    render_sop_steps(action["steps"], "llm"),
+                    unsafe_allow_html=True,
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

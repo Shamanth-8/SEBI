@@ -9,6 +9,9 @@ from app.api import circulars, obligations, compliance, graph
 from app.api import evidence as evidence_api
 from app.api import audit_api
 from app.api import extended as extended_api
+from app.api import notifications as notifications_api
+from app.api import fetcher as fetcher_api
+from app.scheduler.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +41,29 @@ app.include_router(graph.router, prefix="/api/v1/graph", tags=["Graph"])
 app.include_router(evidence_api.router, prefix="/api/v1/evidence", tags=["Evidence"])
 app.include_router(audit_api.router, prefix="/api/v1/audit", tags=["Audit"])
 app.include_router(extended_api.router, prefix="/api/v1", tags=["Extended"])
+app.include_router(notifications_api.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(fetcher_api.router, prefix="/api/v1/fetcher", tags=["Fetcher"])
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Start the SEBI auto-fetch scheduler when the app starts."""
+    from app.api.circulars import orchestrator as _orchestrator
+    try:
+        start_scheduler(_orchestrator)
+        logger.info("SEBI auto-fetch scheduler started on app startup.")
+    except Exception as e:
+        logger.warning(f"Scheduler startup failed (non-fatal): {e}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Gracefully stop the scheduler on app shutdown."""
+    try:
+        stop_scheduler()
+        logger.info("SEBI auto-fetch scheduler stopped.")
+    except Exception as e:
+        logger.warning(f"Scheduler shutdown error (non-fatal): {e}")
 
 
 @app.get("/health")
