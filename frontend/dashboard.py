@@ -576,36 +576,39 @@ def show_upload_page():
     uploaded_file = st.file_uploader("Drop circular PDF here", type=["pdf", "txt"])
 
     # ── Persist file content in session_state across Streamlit rerenders ──
-    # st.file_uploader returns None after the first .read() on rerender,
-    # so we cache bytes + extracted text to avoid the button going disabled.
+    # Use file name+size as a cache key so uploading a different file always
+    # overwrites the previous cache, even if the widget returns None on rerender.
     if uploaded_file is not None:
-        # New file uploaded — read and cache it
-        raw = uploaded_file.read()
-        fname = uploaded_file.name or ""
-        with st.spinner("Reading file…"):
-            if fname.lower().endswith(".pdf"):
-                text = _extract_pdf_text(raw)
-            else:
-                try:
-                    text = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = raw.decode("latin-1")
-        st.session_state["upload_file_bytes"] = raw
-        st.session_state["upload_doc_text"]   = text
-        st.session_state["upload_filename"]   = fname
-        auto_id, auto_title = _parse_metadata(text)
-        st.session_state["upload_auto_id"]    = auto_id
-        st.session_state["upload_auto_title"] = auto_title
-        st.success(f"✅ Read **{len(text):,} characters** from `{fname}`")
+        file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+        if st.session_state.get("upload_file_key") != file_key:
+            # Genuinely new file — read, extract, cache
+            raw = uploaded_file.read()
+            fname = uploaded_file.name or ""
+            with st.spinner("Reading file…"):
+                if fname.lower().endswith(".pdf"):
+                    text = _extract_pdf_text(raw)
+                else:
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        text = raw.decode("latin-1")
+            auto_id, auto_title = _parse_metadata(text)
+            st.session_state["upload_file_key"]   = file_key
+            st.session_state["upload_file_bytes"] = raw
+            st.session_state["upload_doc_text"]   = text
+            st.session_state["upload_filename"]   = fname
+            st.session_state["upload_auto_id"]    = auto_id
+            st.session_state["upload_auto_title"] = auto_title
+        st.success(f"✅ Read **{len(st.session_state['upload_doc_text']):,} characters** from `{st.session_state['upload_filename']}`")
 
-    # Restore from cache if file widget is empty (rerender after interaction)
+    # Restore from cache (survives rerenders from widget interactions)
     file_bytes = st.session_state.get("upload_file_bytes", b"")
     doc_text   = st.session_state.get("upload_doc_text",   "")
     filename   = st.session_state.get("upload_filename",   "")
     auto_id    = st.session_state.get("upload_auto_id",    "")
     auto_title = st.session_state.get("upload_auto_title", "")
 
-    # If no file uploaded and no cache, show text area fallback
+    # If no file cached, show text area fallback
     if not file_bytes:
         doc_text = st.text_area("Or paste circular text", height=120,
                                 placeholder="Paste full circular text here…",
@@ -616,7 +619,6 @@ def show_upload_page():
             st.session_state["upload_auto_id"]    = auto_id
             st.session_state["upload_auto_title"] = auto_title
     elif uploaded_file is None and file_bytes:
-        # Show cached file info (file widget cleared but we still have the bytes)
         st.info(f"📄 Using cached: `{filename}` ({len(doc_text):,} chars) — ready to run.")
 
     col1, col2 = st.columns(2)
@@ -641,7 +643,7 @@ def show_upload_page():
     with col_clear:
         if st.button("🗑 Clear", use_container_width=True, disabled=not file_bytes):
             for k in ["upload_file_bytes", "upload_doc_text", "upload_filename",
-                      "upload_auto_id", "upload_auto_title"]:
+                      "upload_auto_id", "upload_auto_title", "upload_file_key"]:
                 st.session_state.pop(k, None)
             st.rerun()
 

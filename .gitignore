@@ -122,3 +122,4 @@ build/
 # Local development
 local_config.py
 debug/
+*.pdf
