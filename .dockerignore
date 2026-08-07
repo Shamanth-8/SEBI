@@ -22,10 +22,11 @@ cache/
 .env
 .env.local
 
-# Docs and dashboards not needed by the backend image
-*.md
-!README.md
-frontend/
+# frontend/ IS needed — the image runs the dashboard and the API together
+# (Hugging Face Spaces exposes a single port, so both live in one container).
 lib/
 regraph/
 demo_report.html
+ARCHITECTURE.md
+DATASET_GUIDE.md
+OPENROUTER_SETUP.md

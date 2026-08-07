@@ -34,325 +34,307 @@ PIPELINE_TIMEOUT = float(os.getenv("PIPELINE_TIMEOUT", "3600"))
 # ─────────────────────────────────────────────────────────────────────────────
 DESIGN_CSS = """
 <style>
-/* ── Custom properties ── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   RegGraph design system — "Gazette"
+
+   The visual language of an instrument of record, not a generic dashboard:
+   ink ground, warm bone text, one earned accent (verdigris), serif display type,
+   monospace for anything a compliance officer must quote verbatim, and hairline
+   rules instead of glow and drop shadows.
+   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
-  --bg:        #0B0F19;
-  --surface:   #131826;
-  --border:    #1E293B;
-  --accent:    #7C3AED;
-  --accent-lt: #A78BFA;
-  --text:      #E2E8F0;
-  --muted:     #64748B;
-  --high:      #F87171;
-  --medium:    #FBBF24;
-  --low:       #34D399;
-  --high-bg:   rgba(248,113,113,0.10);
-  --med-bg:    rgba(251,191,36,0.10);
-  --low-bg:    rgba(52,211,153,0.10);
-  --ev-red:    #EF4444;
-  --ev-yellow: #F59E0B;
-  --ev-green:  #22C55E;
-  --radius:    10px;
-  --shadow:    0 2px 12px rgba(0,0,0,0.45);
+  /* ground → raised */
+  --bg:         #12161E;
+  --surface:    #1A202B;
+  --surface-2:  #212936;
+  --rule:       #2B3441;
+  --rule-soft:  #222A36;
+
+  /* ink on paper: warm off-white, never pure white */
+  --text:       #E7E2D7;
+  --text-2:     #B6B2A8;
+  --muted:      #8A8F99;
+
+  /* one accent, used sparingly so it still means something */
+  --accent:     #35A18C;
+  --accent-lt:  #62C3AE;
+  --accent-dim: rgba(53,161,140,0.12);
+
+  /* status — earthy, not neon */
+  --high:       #D9634E;
+  --medium:     #D9A441;
+  --low:        #5BA872;
+  --high-bg:    rgba(217,99,78,0.10);
+  --med-bg:     rgba(217,164,65,0.10);
+  --low-bg:     rgba(91,168,114,0.10);
+  --ev-red:     #D9634E;
+  --ev-yellow:  #D9A441;
+  --ev-green:   #5BA872;
+
+  --radius:     3px;
+  --shadow:     none;
+
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --sans:  ui-sans-serif, Inter, -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono:  ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* ── Global reset ── */
+/* ── Global ── */
 html, body, [data-testid="stAppViewContainer"] {
   background-color: var(--bg) !important;
   color: var(--text) !important;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+  font-family: var(--sans) !important;
 }
+[data-testid="stAppViewContainer"] > .main { padding-top: 0.5rem; }
 [data-testid="stSidebar"] {
   background-color: var(--surface) !important;
-  border-right: 1px solid var(--border) !important;
+  border-right: 1px solid var(--rule) !important;
 }
 [data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stToolbar"] { right: 1rem; }
 
-/* ── Typography scale ── */
-h1 { font-size: 1.75rem !important; font-weight: 700 !important; color: var(--accent-lt) !important; letter-spacing: -0.5px; }
-h2 { font-size: 1.25rem !important; font-weight: 600 !important; color: var(--text) !important; margin-top: 1.5rem !important; }
-h3 { font-size: 1.05rem !important; font-weight: 600 !important; color: var(--text) !important; }
-p, li, td, th { font-size: 0.9rem !important; line-height: 1.6 !important; }
-small, .muted { font-size: 0.78rem !important; color: var(--muted) !important; }
+/* Tabular figures everywhere numbers matter — columns of digits must line up */
+.kpi-val, .obl-meta, .bench-table, code, pre, .mono { font-variant-numeric: tabular-nums; }
+
+/* ── Typography ── */
+h1, h2, h3 { font-family: var(--serif) !important; letter-spacing: -0.01em; }
+h1 { font-size: 1.9rem !important; font-weight: 600 !important; color: var(--text) !important; }
+h2 {
+  font-size: 1.4rem !important; font-weight: 600 !important; color: var(--text) !important;
+  border-bottom: 1px solid var(--rule); padding-bottom: 0.4rem; margin-bottom: 1rem !important;
+}
+h3 { font-size: 1.12rem !important; font-weight: 600 !important; color: var(--text) !important; }
+h4, h5 {
+  font-family: var(--sans) !important; font-size: 0.72rem !important; font-weight: 600 !important;
+  text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted) !important;
+}
+p, li, span, label, div { font-size: 0.9rem; }
+a { color: var(--accent-lt) !important; text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font-family: var(--mono) !important; font-size: 0.8rem !important;
+  background: var(--surface-2) !important; color: var(--accent-lt) !important;
+  border: 1px solid var(--rule); border-radius: 2px; padding: 1px 5px;
+}
+.muted { color: var(--muted); font-size: 0.85rem; }
+.accent { color: var(--accent-lt); }
+
+/* ── Masthead ── */
+.masthead { margin: 0 0 18px 0; padding-bottom: 10px; border-bottom: 2px solid var(--rule); }
+.masthead-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.masthead-title {
+  font-family: var(--serif); font-size: 1.75rem; font-weight: 600; letter-spacing: -0.015em;
+  color: var(--text); line-height: 1.1;
+}
+.masthead-sub {
+  font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em;
+  color: var(--muted); text-transform: uppercase;
+}
+.masthead-rule { height: 1px; background: var(--rule-soft); margin-top: 6px; }
+
+/* ── Sidebar brand ── */
+.sidebar-brand { padding: 4px 0 10px 0; }
+.sidebar-logo {
+  font-family: var(--serif); font-size: 1.3rem; font-weight: 600; color: var(--text);
+  letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px;
+}
+.sidebar-logo::before {
+  content: ""; width: 3px; height: 20px; background: var(--accent); display: inline-block;
+}
+.sidebar-tag {
+  font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted); margin-top: 5px; padding-left: 11px;
+}
 
 /* ── Cards ── */
 .rg-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  box-shadow: var(--shadow);
-  margin-bottom: 16px;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: 16px 18px; margin-bottom: 12px;
 }
-.rg-card:hover { border-color: var(--accent); }
+.rg-divider { border: none; border-top: 1px solid var(--rule); margin: 18px 0; }
 
-/* ── KPI metrics ── */
-.kpi-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+/* ── KPI row: figures set in serif, labels in letterspaced caps ── */
+.kpi-row { display: flex; gap: 0; flex-wrap: wrap; margin: 4px 0 16px 0;
+           border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
 .kpi-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px 24px;
-  min-width: 150px;
-  flex: 1;
-  box-shadow: var(--shadow);
+  flex: 1 1 120px; background: var(--surface); padding: 14px 16px;
+  border-right: 1px solid var(--rule); position: relative;
 }
-.kpi-card.accent { border-color: var(--accent); }
-.kpi-val { font-size: 2.1rem; font-weight: 700; color: var(--accent-lt); }
-.kpi-val.high { color: var(--high); }
-.kpi-val.green { color: var(--low); }
-.kpi-lbl { font-size: 0.75rem; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-.kpi-delta { font-size: 0.8rem; margin-top: 4px; }
+.kpi-card:last-child { border-right: none; }
+.kpi-card.accent::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent);
+}
+.kpi-val {
+  font-family: var(--serif); font-size: 1.85rem; font-weight: 600; line-height: 1.05;
+  color: var(--text);
+}
+.kpi-lbl {
+  font-family: var(--sans); font-size: 0.63rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.13em; color: var(--muted); margin-top: 6px;
+}
+.kpi-delta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
 
-/* ── Badges / pills ── */
+/* ── Badges: squared, quiet, readable ── */
 .badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 20px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
+  display: inline-block; font-family: var(--sans); font-size: 0.64rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  padding: 2px 7px; border-radius: 2px; border: 1px solid; white-space: nowrap;
 }
-.badge-high   { background: var(--high-bg);  color: var(--high);   border: 1px solid rgba(248,113,113,0.30); }
-.badge-medium { background: var(--med-bg);   color: var(--medium); border: 1px solid rgba(251,191,36,0.30); }
-.badge-low    { background: var(--low-bg);   color: var(--low);    border: 1px solid rgba(52,211,153,0.30); }
-.badge-red    { background: var(--high-bg);  color: var(--ev-red);    border: 1px solid rgba(239,68,68,0.30); }
-.badge-yellow { background: var(--med-bg);   color: var(--ev-yellow); border: 1px solid rgba(245,158,11,0.30); }
-.badge-green  { background: var(--low-bg);   color: var(--ev-green);  border: 1px solid rgba(34,197,94,0.30); }
-.badge-critical { background: rgba(220,38,38,0.15); color: #FCA5A5; border: 1px solid rgba(220,38,38,0.35); }
+.badge.high, .badge-high, .badge-critical { color: var(--high); border-color: var(--high); background: var(--high-bg); }
+.badge-medium { color: var(--medium); border-color: var(--medium); background: var(--med-bg); }
+.badge-low    { color: var(--low); border-color: var(--low); background: var(--low-bg); }
+.badge.green, .badge-green   { color: var(--ev-green); border-color: var(--ev-green); background: var(--low-bg); }
+.badge-yellow  { color: var(--ev-yellow); border-color: var(--ev-yellow); background: var(--med-bg); }
+.badge-red     { color: var(--ev-red); border-color: var(--ev-red); background: var(--high-bg); }
 
-/* ── Obligation cards ── */
-.obl-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  margin-bottom: 12px;
-  box-shadow: var(--shadow);
-  position: relative;
+.keyword-badge {
+  display: inline-block; font-family: var(--mono); font-size: 0.68rem;
+  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--rule);
+  border-radius: 2px; padding: 1px 6px; margin: 2px 3px 2px 0;
 }
-.obl-card:hover { border-color: var(--accent-lt); }
-.obl-title { font-weight: 600; font-size: 0.95rem; color: var(--text); margin-bottom: 4px; }
-.obl-meta { font-size: 0.78rem; color: var(--muted); margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
-.obl-clause { font-size: 0.78rem; color: var(--muted); font-style: italic; margin-bottom: 8px; }
-
-/* ── Progress bar ── */
-.prog-bar-wrap { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; margin: 6px 0; }
-.prog-bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
-.prog-bar-fill.green { background: var(--ev-green); }
-.prog-bar-fill.yellow { background: var(--ev-yellow); }
-.prog-bar-fill.red { background: var(--ev-red); }
-
-/* ── Stepper ── */
-.stepper { list-style: none; padding: 0; margin: 0; }
-.step-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; }
-.step-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; font-weight: 700; }
-.step-icon.done    { background: rgba(52,211,153,0.2); color: var(--low); border: 1px solid var(--low); }
-.step-icon.active  { background: rgba(124,58,237,0.2); color: var(--accent-lt); border: 1px solid var(--accent); }
-.step-icon.pending { background: var(--border); color: var(--muted); border: 1px solid var(--border); }
-.step-body { flex: 1; }
-.step-name  { font-weight: 600; font-size: 0.88rem; color: var(--text); }
-.step-result { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
-
-/* ── Benchmark table ── */
-.bench-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-.bench-table th { background: var(--border); color: var(--muted); padding: 8px 14px; text-align: left; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.bench-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
-.bench-table tr:last-child td { font-weight: 700; color: var(--accent-lt); background: rgba(124,58,237,0.07); }
-.bench-manual { color: var(--high); }
-.bench-ai     { color: var(--low); }
-
-/* ── Copilot summary card ── */
-.copilot-card {
-  background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(167,139,250,0.05));
-  border: 1px solid rgba(124,58,237,0.35);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  margin-bottom: 20px;
-}
-.copilot-title { font-size: 1.05rem; font-weight: 700; color: var(--accent-lt); margin-bottom: 12px; }
-
-/* ── Section divider ── */
-.rg-divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
-
-/* ── Empty state ── */
-.empty-state { text-align: center; padding: 48px 24px; color: var(--muted); }
-.empty-icon  { font-size: 3rem; margin-bottom: 12px; }
-.empty-text  { font-size: 0.9rem; }
-
-/* ── Loading skeleton ── */
-@keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
-.skeleton {
-  background: linear-gradient(90deg, var(--surface) 25%, var(--border) 50%, var(--surface) 75%);
-  background-size: 800px 100%;
-  animation: shimmer 1.4s infinite;
-  border-radius: 4px;
-  height: 16px;
-  margin: 6px 0;
-}
-
-/* ── Streamlit widget overrides ── */
-div[data-testid="metric-container"] {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-  padding: 14px 18px !important;
-}
-div[data-testid="metric-container"] label { color: var(--muted) !important; font-size: 0.75rem !important; }
-div[data-testid="metric-container"] [data-testid="stMetricValue"] { color: var(--accent-lt) !important; font-size: 1.6rem !important; font-weight: 700 !important; }
-
-button[kind="primary"], .stButton > button[kind="primary"] {
-  background: var(--accent) !important;
-  border: none !important;
-  border-radius: 8px !important;
-  color: white !important;
-  font-weight: 600 !important;
-}
-button[kind="primary"]:hover { background: #6D28D9 !important; }
-
-.stTextInput > div > div > input,
-.stSelectbox > div > div > div,
-.stMultiSelect > div > div > div {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 8px !important;
-  color: var(--text) !important;
-}
-[data-testid="stExpander"] {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-}
-
-/* ── Sidebar header ── */
-.sidebar-brand { padding: 16px 0 8px 0; }
-.sidebar-logo  { font-size: 1.3rem; font-weight: 800; color: var(--accent-lt); }
-.sidebar-tag   { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-
-/* ══════════════════════════════════════════════════════════
-   ANIMATIONS
-   ══════════════════════════════════════════════════════════ */
-
-/* Slide-in from bottom — used for cards appearing after pipeline */
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(18px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.anim-slide-up {
-  animation: slideUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* Fade in */
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.anim-fade-in { animation: fadeIn 0.5s ease both; }
-
-/* Success flash — green pulse on completion */
-@keyframes successPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
-  60%  { box-shadow: 0 0 0 14px rgba(34,197,94,0); }
-  100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
-}
-.anim-success {
-  animation: successPulse 1.1s ease 0.1s both;
-  border-color: var(--ev-green) !important;
-}
-
-/* Alert pulse — red pulse for overdue items */
-@keyframes alertPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-  60%  { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
-  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
-}
-.anim-alert { animation: alertPulse 1.4s ease infinite; }
-
-/* Spinning loader */
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.spinner {
-  display: inline-block;
-  width: 18px; height: 18px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent-lt);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  vertical-align: middle;
-  margin-right: 8px;
-}
-
-/* KPI counter count-up shimmer */
-@keyframes countUp {
-  from { opacity: 0; transform: scale(0.8); }
-  to   { opacity: 1; transform: scale(1); }
-}
-.kpi-val { animation: countUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-
-/* Step item stagger */
-.step-item:nth-child(1) { animation: slideUp 0.3s 0.0s both; }
-.step-item:nth-child(2) { animation: slideUp 0.3s 0.05s both; }
-.step-item:nth-child(3) { animation: slideUp 0.3s 0.10s both; }
-.step-item:nth-child(4) { animation: slideUp 0.3s 0.15s both; }
-.step-item:nth-child(5) { animation: slideUp 0.3s 0.20s both; }
-.step-item:nth-child(6) { animation: slideUp 0.3s 0.25s both; }
-
-/* Evidence requirement rows */
-@keyframes rowPop {
-  from { opacity: 0; transform: translateX(-10px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-.ev-req-row {
-  animation: rowPop 0.35s ease both;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  margin-bottom: 8px;
-  background: var(--surface);
-}
-.ev-req-row:nth-child(1) { animation-delay: 0.0s; }
-.ev-req-row:nth-child(2) { animation-delay: 0.05s; }
-.ev-req-row:nth-child(3) { animation-delay: 0.10s; }
-.ev-req-row:nth-child(4) { animation-delay: 0.15s; }
-.ev-req-row:nth-child(5) { animation-delay: 0.20s; }
-.ev-req-row.satisfied  { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.05); }
-.ev-req-row.unsatisfied{ border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.05); }
-
-/* SOP step list */
-.sop-step {
-  display: flex; gap: 12px; align-items: flex-start;
-  padding: 8px 0;
-  animation: slideUp 0.3s ease both;
-}
-.sop-step:nth-child(1) { animation-delay: 0.00s; }
-.sop-step:nth-child(2) { animation-delay: 0.04s; }
-.sop-step:nth-child(3) { animation-delay: 0.08s; }
-.sop-step:nth-child(4) { animation-delay: 0.12s; }
-.sop-step:nth-child(5) { animation-delay: 0.16s; }
-.sop-step:nth-child(6) { animation-delay: 0.20s; }
-.sop-num {
-  min-width: 26px; height: 26px; border-radius: 50%;
-  background: rgba(124,58,237,0.18); border: 1px solid rgba(124,58,237,0.4);
-  color: var(--accent-lt); font-size: 0.75rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.sop-text { font-size: 0.87rem; color: var(--text); line-height: 1.55; }
-
-/* LLM badge */
 .llm-badge {
   display: inline-flex; align-items: center; gap: 5px;
-  background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.35);
-  border-radius: 20px; padding: 2px 10px;
-  font-size: 0.72rem; font-weight: 600; color: var(--accent-lt);
-  letter-spacing: 0.3px;
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em;
+  color: var(--muted); background: var(--surface-2);
+  border: 1px solid var(--rule); border-radius: 2px; padding: 2px 8px;
 }
-.keyword-badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.3);
-  border-radius: 20px; padding: 2px 10px;
-  font-size: 0.72rem; color: var(--muted);
+
+/* ── Obligation card: a left rule carries severity, like a margin mark ── */
+.obl-card {
+  background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--muted);
+  border-radius: var(--radius); padding: 13px 16px; margin-bottom: 9px;
+}
+.obl-card.high   { border-left-color: var(--high); }
+.obl-card.medium { border-left-color: var(--medium); }
+.obl-card.low    { border-left-color: var(--low); }
+.obl-title { font-family: var(--serif); font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.obl-clause {
+  font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+  border-left: 2px solid var(--rule); padding-left: 9px; margin: 6px 0;
+  white-space: pre-wrap; word-break: break-word;
+}
+.obl-meta {
+  font-family: var(--sans); font-size: 0.76rem; color: var(--text-2);
+  display: flex; gap: 14px; flex-wrap: wrap; margin-top: 7px;
+}
+
+/* ── Pipeline stepper: a numbered ledger, not a progress bar ── */
+.stepper { list-style: none; padding: 0; margin: 0; }
+.step-item {
+  display: flex; gap: 13px; padding: 9px 0; border-bottom: 1px solid var(--rule-soft);
+}
+.step-item:last-child { border-bottom: none; }
+.step-icon {
+  flex: 0 0 24px; height: 24px; border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+  border: 1px solid var(--rule); color: var(--muted); background: var(--surface-2);
+}
+.step-icon.done   { border-color: var(--accent); color: var(--accent-lt); background: var(--accent-dim); }
+.step-icon.active { border-color: var(--medium); color: var(--medium); background: var(--med-bg); }
+.step-body { flex: 1; }
+.step-name { font-size: 0.86rem; font-weight: 600; color: var(--text); }
+.step-result { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+/* ── SOP steps ── */
+.sop-step { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule-soft); }
+.sop-step:last-child { border-bottom: none; }
+.sop-num {
+  flex: 0 0 20px; font-family: var(--mono); font-size: 0.72rem; color: var(--accent-lt);
+  padding-top: 1px;
+}
+.sop-text { font-size: 0.83rem; color: var(--text-2); line-height: 1.55; }
+
+/* ── Copilot card ── */
+.copilot-card {
+  background: var(--surface); border: 1px solid var(--rule); border-top: 2px solid var(--accent);
+  border-radius: var(--radius); padding: 17px 19px; margin: 12px 0;
+}
+.copilot-title {
+  font-family: var(--serif); font-size: 1.08rem; font-weight: 600; color: var(--text);
+  margin-bottom: 12px; padding-bottom: 7px; border-bottom: 1px solid var(--rule-soft);
+}
+
+/* ── Progress bar ── */
+.prog-bar-wrap {
+  height: 5px; background: var(--surface-2); border: 1px solid var(--rule);
+  border-radius: 2px; overflow: hidden; margin: 5px 0;
+}
+.prog-bar-fill { height: 100%; background: var(--accent); }
+
+/* ── Evidence requirement rows ── */
+.ev-req-row {
+  display: flex; align-items: flex-start; gap: 9px; padding: 6px 0;
+  border-bottom: 1px solid var(--rule-soft); font-size: 0.82rem;
+}
+.ev-req-row:last-child { border-bottom: none; }
+
+/* ── Benchmark table ── */
+.bench-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+.bench-table th {
+  text-align: left; font-family: var(--sans); font-size: 0.63rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted);
+  padding: 7px 10px; border-bottom: 1px solid var(--rule);
+}
+.bench-table td { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); color: var(--text-2); }
+.bench-manual { color: var(--high); font-family: var(--mono); }
+.bench-ai     { color: var(--low); font-family: var(--mono); }
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center; padding: 44px 20px; border: 1px dashed var(--rule);
+  border-radius: var(--radius); background: var(--surface);
+}
+.empty-icon { font-size: 1.8rem; opacity: 0.4; margin-bottom: 10px; }
+.empty-text { color: var(--muted); font-size: 0.87rem; }
+
+/* ── Streamlit widget overrides ── */
+.stButton > button {
+  font-family: var(--sans); font-size: 0.83rem; font-weight: 600;
+  letter-spacing: 0.02em; border-radius: 2px;
+  border: 1px solid var(--rule); background: var(--surface-2); color: var(--text);
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.stButton > button:hover { border-color: var(--accent); color: var(--accent-lt); }
+.stButton > button[kind="primary"] {
+  background: var(--accent); border-color: var(--accent); color: #0C1512;
+}
+.stButton > button[kind="primary"]:hover { background: var(--accent-lt); border-color: var(--accent-lt); color: #0C1512; }
+
+[data-testid="stMetricValue"] { font-family: var(--serif) !important; }
+[data-testid="stExpander"] details {
+  border: 1px solid var(--rule) !important; border-radius: var(--radius) !important;
+  background: var(--surface) !important;
+}
+[data-testid="stExpander"] summary { font-size: 0.85rem !important; font-family: var(--sans) !important; }
+.stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid var(--rule); }
+.stTabs [data-baseweb="tab"] {
+  font-family: var(--sans); font-size: 0.82rem; font-weight: 600;
+  letter-spacing: 0.02em; border-radius: 0; color: var(--muted);
+}
+.stTabs [aria-selected="true"] { color: var(--accent-lt) !important; }
+[data-testid="stDataFrame"] { border: 1px solid var(--rule); border-radius: var(--radius); }
+[data-testid="stFileUploader"] section {
+  border: 1px dashed var(--rule) !important; background: var(--surface) !important;
+  border-radius: var(--radius) !important;
+}
+[data-testid="stChatMessage"] {
+  background: var(--surface) !important; border: 1px solid var(--rule) !important;
+  border-radius: var(--radius) !important;
+}
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Motion: brief and few ── */
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.anim-fade-in  { animation: fadeIn 0.25s ease; }
+.anim-slide-up { animation: slideUp 0.28s ease; }
+.anim-success  { animation: fadeIn 0.3s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-in, .anim-slide-up, .anim-success { animation: none; }
 }
 </style>
 """
@@ -560,8 +542,26 @@ def _render_stepper(done: int, results: list[str], error: str = "") -> str:
     return html
 
 
+def masthead(title: str, kicker: str = "", meta: str = "") -> None:
+    """
+    Page header set like the masthead of an official gazette: serif title, a
+    letterspaced kicker above it, and document-style metadata on the right.
+    Replaces the emoji-prefixed h2 that made every page look interchangeable.
+    """
+    st.markdown(f"""
+<div class="masthead">
+  <div class="masthead-row">
+    <div>
+      {f'<div class="masthead-sub">{kicker}</div>' if kicker else ''}
+      <div class="masthead-title">{title}</div>
+    </div>
+    {f'<div class="masthead-sub">{meta}</div>' if meta else ''}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
 def show_upload_page():
-    st.markdown("## 📤 Upload Regulatory Circular")
+    masthead("Upload Regulatory Circular", "Intake", "Agent pipeline")
     st.markdown(
         '<p class="muted">Drop a SEBI circular PDF → the multi-agent pipeline extracts, '
         'diffs, and maps obligations automatically.</p>', unsafe_allow_html=True
@@ -943,7 +943,7 @@ def _show_pipeline_result(p: dict, nested: bool = False):
 
 
 def show_overview_page(intermediary_type: str):
-    st.markdown("## 📈 Dashboard Overview")
+    masthead("Compliance Overview", "Position", f"{intermediary_type.replace('_',' ').title()}")
 
     stats = api_get("/graph/statistics")
     if has_error(stats) or stats.get("total_obligations", 0) == 0:
@@ -1012,7 +1012,7 @@ def show_overview_page(intermediary_type: str):
         fig = go.Figure(go.Bar(
             x=["Complete", "Partial", "Missing"],
             y=[ev.get("complete", 0), ev.get("partial", 0), ev.get("missing", 0)],
-            marker_color=["#22C55E", "#F59E0B", "#EF4444"],
+            marker_color=["#5BA872", "#D9A441", "#D9634E"],
             marker_line_width=0,
         ))
         fig.update_layout(
@@ -1020,7 +1020,7 @@ def show_overview_page(intermediary_type: str):
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             font_color="#94A3B8", font_size=12,
             margin=dict(l=8, r=8, t=40, b=8),
-            xaxis=dict(gridcolor="#1E293B"), yaxis=dict(gridcolor="#1E293B"),
+            xaxis=dict(gridcolor="#2B3441"), yaxis=dict(gridcolor="#2B3441"),
             height=240,
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -1037,7 +1037,7 @@ def show_overview_page(intermediary_type: str):
                 orientation="h",
                 marker=dict(
                     color=list(all_scores.values()),
-                    colorscale=[[0, "#EF4444"], [0.5, "#F59E0B"], [1, "#22C55E"]],
+                    colorscale=[[0, "#D9634E"], [0.5, "#D9A441"], [1, "#5BA872"]],
                     cmin=0, cmax=100,
                 ),
             ))
@@ -1045,8 +1045,8 @@ def show_overview_page(intermediary_type: str):
                 title="Compliance Score by Intermediary",
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 font_color="#94A3B8", font_size=12,
-                xaxis=dict(range=[0,100], gridcolor="#1E293B"),
-                yaxis=dict(gridcolor="#1E293B"),
+                xaxis=dict(range=[0,100], gridcolor="#2B3441"),
+                yaxis=dict(gridcolor="#2B3441"),
                 margin=dict(l=8, r=8, t=40, b=8),
                 height=240,
             )
@@ -1090,7 +1090,7 @@ def show_overview_page(intermediary_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show_obligations_page(intermediary_type: str):
-    st.markdown("## 📋 Obligations & Risk Queue")
+    masthead("Obligations & Risk Queue", "Register", f"{intermediary_type.replace('_',' ').title()}")
 
     tab1, tab2 = st.tabs(["🚨 Urgency Queue (by Risk)", "🔍 Search Obligations"])
 
@@ -1216,7 +1216,7 @@ def _show_search_obligations(intermediary_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show_graph_page():
-    st.markdown("## 🌐 Obligation Graph — Digital Twin")
+    masthead("Obligation Graph", "Dependencies", "Digital twin")
     st.markdown('<p class="muted">Every node is an obligation. Every edge is a dependency, supersession, or cross-reference. Node size = downstream impact.</p>', unsafe_allow_html=True)
 
     tab1, tab2, tab3 = st.tabs(["📊 Graph Analytics", "🗺 Interactive Graph", "🔗 Impact Analysis"])
@@ -1307,34 +1307,34 @@ def _show_interactive_graph():
         import tempfile, pathlib
 
         net = Network(height="520px", width="100%", directed=True,
-                      bgcolor="#131826", font_color="#E2E8F0")
+                      bgcolor="#1A202B", font_color="#E7E2D7")
         net.barnes_hut(gravity=-8000, central_gravity=0.3, spring_length=120)
 
         color_map = {
-            "high":   {"background": "#EF4444", "border": "#B91C1C"},
-            "medium": {"background": "#F59E0B", "border": "#D97706"},
-            "low":    {"background": "#22C55E", "border": "#16A34A"},
+            "high":   {"background": "#D9634E", "border": "#A8412F"},
+            "medium": {"background": "#D9A441", "border": "#A87B26"},
+            "low":    {"background": "#5BA872", "border": "#3F7E52"},
         }
-        ev_color_map = {"green": "#22C55E", "yellow": "#F59E0B", "red": "#EF4444"}
+        ev_color_map = {"green": "#5BA872", "yellow": "#D9A441", "red": "#D9634E"}
 
         for node in nodes:
             sev = node.get("severity", "medium")
             col = color_map.get(sev, color_map["medium"])
-            ev_col = ev_color_map.get(node.get("evidence_status","red"), "#EF4444")
+            ev_col = ev_color_map.get(node.get("evidence_status","red"), "#D9634E")
             label = node["label"][:40] + ("…" if len(node["label"]) > 40 else "")
             net.add_node(
                 node["id"],
                 label=label,
                 title=f"<b>{node['label']}</b><br>Severity: {sev}<br>Evidence: {node.get('evidence_status','—')}",
                 color={"background": col["background"], "border": ev_col,
-                       "highlight": {"background": "#7C3AED", "border": "#A78BFA"}},
+                       "highlight": {"background": "#35A18C", "border": "#62C3AE"}},
                 size=16 + min(node.get("evidence_count", 0) * 2, 14),
-                font={"color": "#E2E8F0", "size": 11},
+                font={"color": "#E7E2D7", "size": 11},
             )
 
-        edge_style = {"depends_on": "#64748B", "supersedes": "#A78BFA", "cross_reference": "#34D399", "related": "#475569"}
+        edge_style = {"depends_on": "#8A8F99", "supersedes": "#62C3AE", "cross_reference": "#5BA872", "related": "#2B3441"}
         for edge in edges:
-            col = edge_style.get(edge.get("type", "related"), "#475569")
+            col = edge_style.get(edge.get("type", "related"), "#2B3441")
             dashes = edge.get("type") == "supersedes"
             net.add_edge(edge["source"], edge["target"], color=col,
                          dashes=dashes, arrows="to", width=1.5)
@@ -1348,9 +1348,9 @@ def _show_interactive_graph():
         # Legend
         st.markdown("""
 <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:0.8rem">
-  <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#EF4444;margin-right:5px"></span>High severity</span>
-  <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#F59E0B;margin-right:5px"></span>Medium severity</span>
-  <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#22C55E;margin-right:5px"></span>Low severity</span>
+  <span><span style="display:inline-block;width:9px;height:9px;border-radius:1px;background:#D9634E;margin-right:5px"></span>High severity</span>
+  <span><span style="display:inline-block;width:9px;height:9px;border-radius:1px;background:#D9A441;margin-right:5px"></span>Medium severity</span>
+  <span><span style="display:inline-block;width:9px;height:9px;border-radius:1px;background:#5BA872;margin-right:5px"></span>Low severity</span>
   <span style="color:var(--muted)">Border = evidence status &nbsp;|&nbsp; Size = evidence count &nbsp;|&nbsp; Dashed edge = supersedes</span>
 </div>""", unsafe_allow_html=True)
 
@@ -1379,18 +1379,18 @@ def _plotly_graph_fallback(nodes, edges):
 
     node_x = [pos[n][0] for n in G.nodes() if n in pos]
     node_y = [pos[n][1] for n in G.nodes() if n in pos]
-    sev_colors = {"high": "#EF4444", "medium": "#F59E0B", "low": "#22C55E"}
-    node_colors = [sev_colors.get(G.nodes[n].get("severity","medium"), "#F59E0B") for n in G.nodes() if n in pos]
+    sev_colors = {"high": "#D9634E", "medium": "#D9A441", "low": "#5BA872"}
+    node_colors = [sev_colors.get(G.nodes[n].get("severity","medium"), "#D9A441") for n in G.nodes() if n in pos]
     node_texts = [G.nodes[n].get("label", n)[:30] for n in G.nodes() if n in pos]
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
-                             line=dict(color="#1E293B", width=1), hoverinfo="none"))
+                             line=dict(color="#2B3441", width=1), hoverinfo="none"))
     fig.add_trace(go.Scatter(x=node_x, y=node_y, mode="markers+text",
                              marker=dict(size=12, color=node_colors),
                              text=node_texts, textposition="top center",
                              textfont=dict(color="#94A3B8", size=9)))
-    fig.update_layout(paper_bgcolor="#0B0F19", plot_bgcolor="#0B0F19",
+    fig.update_layout(paper_bgcolor="#12161E", plot_bgcolor="#12161E",
                       showlegend=False, height=480,
                       xaxis=dict(showgrid=False, zeroline=False, visible=False),
                       yaxis=dict(showgrid=False, zeroline=False, visible=False))
@@ -1512,7 +1512,7 @@ def show_compliance_page(intermediary_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show_evidence_page(intermediary_type: str):
-    st.markdown("## ⚠️ Evidence Gaps")
+    masthead("Evidence Gaps", "Assurance", f"{intermediary_type.replace('_',' ').title()}")
 
     data = api_get("/evidence/gaps", timeout=15)
     if has_error(data) or not data.get("gaps"):
@@ -1633,7 +1633,7 @@ def show_evidence_page(intermediary_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show_actions_page(intermediary_type: str):
-    st.markdown("## 🎯 Compliance Actions")
+    masthead("Compliance Actions", "Execution", f"{intermediary_type.replace('_',' ').title()}")
     st.markdown('<p class="muted">Structured, assignable work items generated from obligations. Sorted by priority + urgency.</p>', unsafe_allow_html=True)
 
     # ── Notification panel ────────────────────────────────────────────────
@@ -1777,7 +1777,7 @@ def show_actions_page(intermediary_type: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show_audit_page():
-    st.markdown("## 🔒 Audit Trail")
+    masthead("Audit Trail", "Record", "Immutable log")
 
     summary = api_get("/audit/summary", timeout=10)
     if not has_error(summary):
@@ -1822,9 +1822,10 @@ def main():
     with st.sidebar:
         st.markdown("""
 <div class="sidebar-brand">
-  <div class="sidebar-logo">🏛 RegGraph</div>
-  <div class="sidebar-tag">Agentic Compliance System</div>
-  <div style="font-size:0.7rem;color:#334155;margin-top:2px">SEBI · Multi-Agent Pipeline</div>
+  <div class="sidebar-logo">RegGraph</div>
+  <div class="sidebar-tag">Regulatory Obligation Ledger</div>
+  <div style="font-family:var(--mono);font-size:0.6rem;color:var(--muted);opacity:0.65;
+              margin-top:5px;padding-left:11px;letter-spacing:0.08em">SEBI · PS-2</div>
 </div>""", unsafe_allow_html=True)
         st.markdown('<hr class="rg-divider" style="margin:8px 0 12px 0">', unsafe_allow_html=True)
 
@@ -1870,19 +1871,23 @@ def main():
                 styles={
                     "container": {
                         "padding": "0",
-                        "background-color": "#131826",
+                        "background-color": "#1A202B",
                     },
-                    "icon": {"color": "#64748B", "font-size": "14px"},
+                    "icon": {"color": "#8A8F99", "font-size": "13px"},
                     "nav-link": {
-                        "font-size": "0.88rem",
-                        "color": "#94A3B8",
-                        "padding": "10px 14px",
-                        "border-radius": "8px",
-                        "margin": "2px 0",
+                        "font-size": "0.84rem",
+                        "font-weight": "500",
+                        "color": "#B6B2A8",
+                        "padding": "9px 12px",
+                        "border-radius": "2px",
+                        "margin": "1px 0",
+                        # A left rule marks the active item — a margin mark, not a pill.
+                        "border-left": "2px solid transparent",
                     },
                     "nav-link-selected": {
-                        "background-color": "rgba(124,58,237,0.20)",
-                        "color": "#A78BFA",
+                        "background-color": "rgba(53,161,140,0.10)",
+                        "border-left": "2px solid #35A18C",
+                        "color": "#62C3AE",
                         "font-weight": "600",
                     },
                 },

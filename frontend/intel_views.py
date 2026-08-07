@@ -17,29 +17,34 @@ import streamlit as st
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 
 # ── Chart tokens ─────────────────────────────────────────────────────────────
-# Categorical hues stepped for this dashboard's dark surface (#131826) and
-# validated as a set: lightness band, chroma floor, CVD separation, normal-vision
-# separation and 3:1 contrast all pass. Assigned in fixed order, never cycled.
+# Categorical hues stepped for the "Gazette" ink surface (#1A202B) and validated
+# as a set against it: lightness band, chroma floor, CVD separation (worst
+# adjacent ΔE 8.4), normal-vision separation (19.3) and 3:1 contrast all pass.
+# Assigned in fixed order, never cycled.
 CAT = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"]
 
 # Status colours are reserved for severity and never reused as "series 4".
-SEV_COLOR = {"high": "#F87171", "medium": "#FBBF24", "low": "#34D399"}
+# Earthy rather than neon, to match the document-like chrome.
+SEV_COLOR = {"high": "#D9634E", "medium": "#D9A441", "low": "#5BA872"}
 SEV_ORDER = ["high", "medium", "low"]
 
-# Single hue for magnitude (sequential role) — the app's accent.
-SEQ = "#8B5CF6"
-SEQ_MUTED = "rgba(139,92,246,0.35)"
+# Single hue for magnitude (sequential role) — the app's verdigris accent.
+SEQ = "#35A18C"
+SEQ_RGB = "53,161,140"
 
-INK = "#E2E8F0"
-INK_MUTED = "#94A3B8"
-GRID = "#1E293B"
-SURFACE = "#131826"
+INK = "#E7E2D7"          # warm bone, never pure white
+INK_MUTED = "#8A8F99"
+GRID = "#2B3441"
+SURFACE = "#1A202B"
+
+SERIF = "ui-serif, 'Iowan Old Style', Palatino, Georgia, serif"
+SANS = "ui-sans-serif, Inter, system-ui, sans-serif"
 
 LEVEL_STYLE = {
-    "success": ("✅", "#34D399"),
-    "warning": ("⚠️", "#FBBF24"),
-    "info": ("ℹ️", "#60A5FA"),
-    "error": ("❌", "#F87171"),
+    "success": ("●", "#5BA872"),
+    "warning": ("▲", "#D9A441"),
+    "info": ("■", "#7FA8D9"),
+    "error": ("✕", "#D9634E"),
 }
 
 
@@ -90,7 +95,7 @@ def _style(fig: go.Figure, height: int = 280, showlegend: bool = False,
         margin=dict(l=8, r=16, t=8, b=8),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=INK, size=12, family="Inter, system-ui, sans-serif"),
+        font=dict(color=INK, size=12, family=SANS),
         showlegend=showlegend,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
                     bgcolor="rgba(0,0,0,0)", font=dict(color=INK_MUTED, size=11)),
@@ -141,7 +146,7 @@ def _sequential(values: List[float]) -> List[str]:
     if not values:
         return []
     hi = max(values) or 1
-    return [f"rgba(139,92,246,{0.35 + 0.6 * (v / hi):.2f})" for v in values]
+    return [f"rgba({SEQ_RGB},{0.32 + 0.62 * (v / hi):.2f})" for v in values]
 
 
 # ── Small HTML pieces ────────────────────────────────────────────────────────
@@ -175,26 +180,31 @@ def _recognition_card(rec: Dict) -> str:
     circ = rec.get("circular_confidence", 0)
     is_circ = rec.get("is_circular", False)
     novel = rec.get("is_novel_topic", False)
-    color = "#34D399" if (is_circ and not novel) else ("#FBBF24" if is_circ else "#F87171")
+    color = (SEV_COLOR["low"] if (is_circ and not novel)
+             else (SEV_COLOR["medium"] if is_circ else SEV_COLOR["high"]))
     badge = "RECOGNISED" if is_circ and not novel else ("NOVEL TOPIC" if is_circ else "REJECTED")
     fam = (rec.get("family_label") or rec.get("family") or "—")
+    # Styled as a stamp on a document rather than a rounded status pill.
     return f"""
-<div class="rg-card" style="border-color:{color}">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
+<div class="rg-card" style="border-left:3px solid {color}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
     <div>
-      <span style="font-size:0.68rem;letter-spacing:1px;color:{color};font-weight:700;
-                   border:1px solid {color};padding:2px 8px;border-radius:20px">{badge}</span>
-      <div style="font-size:1.05rem;font-weight:650;color:{INK};margin-top:8px">{verdict}</div>
-      <div style="color:{INK_MUTED};font-size:0.82rem;margin-top:4px">
-        Closest family: <b style="color:{INK}">{fam}</b> ·
-        {rec.get("windows_analysed", 0)} text windows analysed ·
-        novelty {rec.get("novelty", 0):.0%}
+      <span style="font-size:0.62rem;letter-spacing:0.14em;color:{color};font-weight:600;
+                   border:1px solid {color};padding:2px 7px;border-radius:2px;
+                   text-transform:uppercase">{badge}</span>
+      <div style="font-family:{SERIF};font-size:1.12rem;font-weight:600;color:{INK};
+                  margin-top:10px;line-height:1.3">{verdict}</div>
+      <div style="color:{INK_MUTED};font-size:0.8rem;margin-top:6px">
+        Closest family <b style="color:{INK}">{fam}</b>
+        <span style="color:{GRID}"> · </span>{rec.get("windows_analysed", 0)} windows analysed
+        <span style="color:{GRID}"> · </span>novelty {rec.get("novelty", 0):.0%}
       </div>
     </div>
-    <div style="text-align:right">
-      <div style="font-size:1.8rem;font-weight:700;color:{color};line-height:1">{circ:.0%}</div>
-      <div style="font-size:0.7rem;color:{INK_MUTED};text-transform:uppercase;letter-spacing:0.5px">
-        is a circular</div>
+    <div style="text-align:right;padding-left:14px;border-left:1px solid {GRID}">
+      <div style="font-family:{SERIF};font-size:2rem;font-weight:600;color:{color};
+                  line-height:1;font-variant-numeric:tabular-nums">{circ:.0%}</div>
+      <div style="font-size:0.6rem;color:{INK_MUTED};text-transform:uppercase;
+                  letter-spacing:0.13em;margin-top:5px">is a circular</div>
     </div>
   </div>
 </div>"""
@@ -380,14 +390,28 @@ def render_ai_block(ai: Dict) -> None:
         st.caption(f"**Effort:** {ins['effort_view']}")
 
 
+def _masthead(title: str, kicker: str = "", meta: str = "") -> None:
+    """Page header matching dashboard.masthead — see the CSS in dashboard.py."""
+    st.markdown(f"""
+<div class="masthead">
+  <div class="masthead-row">
+    <div>
+      {f'<div class="masthead-sub">{kicker}</div>' if kicker else ''}
+      <div class="masthead-title">{title}</div>
+    </div>
+    {f'<div class="masthead-sub">{meta}</div>' if meta else ''}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
 # ── Page: Document Intelligence ──────────────────────────────────────────────
 
 def render_intelligence_page(intermediary_type: str) -> None:
-    st.markdown("## 🧠 Document Intelligence")
+    _masthead("Document Intelligence", "Local model", "No LLM · no quota")
     st.markdown(
-        f'<p style="color:{INK_MUTED};margin-top:-8px">Runs the locally trained model on any '
-        'PDF — recognition, obligations and charts — with no LLM call and no API quota spent. '
-        'This is what the pipeline sees <i>before</i> the AI layer.</p>',
+        f'<p style="color:{INK_MUTED};margin-top:-10px;max-width:64ch">Runs the locally trained '
+        'model on any PDF — recognition, obligations and charts — with no LLM call and no API '
+        'quota spent. This is what the pipeline sees <i>before</i> the AI layer.</p>',
         unsafe_allow_html=True)
 
     model = _get("/intel/model", timeout=15)
@@ -655,11 +679,11 @@ def _render_model_tab(model: Dict) -> None:
 # ── Page: Chat ───────────────────────────────────────────────────────────────
 
 def render_chat_page() -> None:
-    st.markdown("## 💬 Ask about a circular")
+    _masthead("Ask the Circular", "Enquiry", "Answers cite their clause")
     st.markdown(
-        f'<p style="color:{INK_MUTED};margin-top:-8px">Questions are answered from passages '
-        'retrieved out of the circular itself, with the clause shown alongside — so every '
-        'answer can be checked against the source.</p>', unsafe_allow_html=True)
+        f'<p style="color:{INK_MUTED};margin-top:-10px;max-width:64ch">Questions are answered '
+        'from passages retrieved out of the circular itself, with the clause shown alongside — '
+        'so every answer can be checked against the source.</p>', unsafe_allow_html=True)
 
     listing = _get("/chat/circulars", timeout=15)
     if _err(listing):

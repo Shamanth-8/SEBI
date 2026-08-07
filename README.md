@@ -1,3 +1,19 @@
+---
+title: RegGraph — Agentic Compliance
+emoji: 🏛
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: SEBI regulatory circulars to auditable compliance obligations
+---
+
+<!-- The block above is Hugging Face Spaces configuration. GitHub shows it as
+     text; the Space reads it to build the container. app_port must match the
+     PORT the dashboard binds to in Dockerfile/start.sh. -->
+
 # RegGraph — Agentic Compliance System
 
 > Transforms SEBI regulatory circulars into structured, auditable compliance obligations using a multi-agent AI pipeline.
