@@ -21,12 +21,14 @@ class ComplianceMappingAgent:
     
     def __init__(self, obligation_graph: ObligationGraph):
         settings = get_settings()
-        self.client = create_anthropic_compatible_client(settings.LLM_PROVIDER)
         self.settings = settings
         self.model = self.settings.LLM_MODEL
         self.graph = obligation_graph
+        # Lazy — see the note in SemanticDiffAgent. Without an API key this agent
+        # still runs; it just skips the LLM applicability refinement.
+        self._client = None
         logger.info(f"Initialized mapping agent with provider: {settings.LLM_PROVIDER}, model: {self.model}")
-        
+
         # Intermediary type profiles
         self.intermediary_profiles = {
             'stockbroker': {
@@ -42,7 +44,14 @@ class ComplianceMappingAgent:
                 'key_activities': ['advice', 'portfolio management', 'client communication']
             }
         }
-    
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = create_anthropic_compatible_client(self.settings.LLM_PROVIDER)
+        return self._client
+
+
     def map_obligations_to_intermediary(
         self,
         intermediary_type: str,
@@ -116,7 +125,14 @@ class ComplianceMappingAgent:
         custom_conditions: Optional[Dict] = None
     ) -> tuple[List[Obligation], List[Obligation]]:
         """Use Claude to refine applicability of obligations."""
-        
+
+        # In ml mode the pipeline makes no network calls. The obligations already
+        # carry intermediary_types from the local model, so the pre-filter the
+        # caller applied is the answer — refining it is what the LLM was for.
+        from app.config import get_settings
+        if (get_settings().EXTRACTION_MODE or "").lower() == "ml":
+            return obligations, []
+
         profile = self.intermediary_profiles.get(intermediary_type, {})
         obl_summaries = "\n".join([
             f"- {obl.obligation_id}: {obl.title} ({obl.description[:100]}...)"

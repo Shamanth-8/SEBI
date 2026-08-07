@@ -22,8 +22,24 @@ class Settings:
     
     # OpenRouter Configuration
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    # Additional keys used only when the primary is exhausted. Accepts a
+    # comma-separated list, and OPENROUTER_API_KEY itself may also be a list.
+    # The free tier is 50 requests/day per key, which one 400-page circular can
+    # burn through, so failover is the difference between a demo and a 429.
+    OPENROUTER_API_KEY_BACKUP: str = os.getenv("OPENROUTER_API_KEY_BACKUP", "")
     OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3-sonnet")
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+
+    @property
+    def OPENROUTER_API_KEYS(self) -> list:
+        """Primary key(s) first, then backups, de-duplicated, blanks dropped."""
+        raw = f"{self.OPENROUTER_API_KEY},{self.OPENROUTER_API_KEY_BACKUP}"
+        keys, seen = [], set()
+        for k in (part.strip() for part in raw.split(",")):
+            if k and k not in seen:
+                seen.add(k)
+                keys.append(k)
+        return keys
     
     # Direct Anthropic Configuration
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
@@ -61,11 +77,35 @@ class Settings:
     # Timeouts
     LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT", "120"))
     API_TIMEOUT: int = int(os.getenv("API_TIMEOUT", "60"))
-    
+
+    # LLM reliability / cost controls
+    LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "3"))
+    # How many chunks to extract concurrently. Kept low so we don't amplify 429s.
+    LLM_CONCURRENCY: int = int(os.getenv("LLM_CONCURRENCY", "4"))
+    # Characters per extraction chunk. Larger = fewer LLM calls per circular.
+    EXTRACTION_CHUNK_SIZE: int = int(os.getenv("EXTRACTION_CHUNK_SIZE", "6000"))
+    # Output budget per chunk. Must be large enough for the whole JSON array —
+    # a truncated array used to make the model's entire answer unparseable.
+    EXTRACTION_MAX_TOKENS: int = int(os.getenv("EXTRACTION_MAX_TOKENS", "4000"))
+
+    # ── Local model (trained on the synthetic corpus) ────────────────────────
+    # hybrid : local model always extracts; the LLM enriches when reachable (default)
+    # ml     : local model only — fully offline, no API key needed
+    # llm    : LLM only (original behaviour; fails when the provider is down)
+    EXTRACTION_MODE: str = os.getenv("EXTRACTION_MODE", "hybrid").lower()
+    MODEL_DIR: str = os.getenv("MODEL_DIR", "./data/models")
+    # Probability above which a sentence is treated as an obligation. Lower =
+    # higher recall and more noise; 0.55 was tuned against the real 38-page circular.
+    ML_OBLIGATION_THRESHOLD: float = float(os.getenv("ML_OBLIGATION_THRESHOLD", "0.55"))
+    # One extra LLM call per circular for the narrative insight layer.
+    ENABLE_AI_INSIGHTS: bool = os.getenv("ENABLE_AI_INSIGHTS", "true").lower() == "true"
+
     # Feature Flags
     ENABLE_SEMANTIC_SEARCH: bool = os.getenv("ENABLE_SEMANTIC_SEARCH", "true").lower() == "true"
     ENABLE_GRAPH_VISUALIZATION: bool = os.getenv("ENABLE_GRAPH_VISUALIZATION", "true").lower() == "true"
     ENABLE_IMPACT_ANALYSIS: bool = os.getenv("ENABLE_IMPACT_ANALYSIS", "true").lower() == "true"
+    # Each LLM-generated SOP costs one extra call per obligation. Off by default.
+    ENABLE_LLM_SOP: bool = os.getenv("ENABLE_LLM_SOP", "false").lower() == "true"
 
     # ── Notification settings ────────────────────────────────────────────────
     # Email (SMTP)

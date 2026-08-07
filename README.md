@@ -4,8 +4,35 @@
 
 **Problem Statement 2** — Agentic Compliance: From Regulatory Text to Operational Action
 
-**Corpus:** SEBI Master Circular on Surveillance of Securities Market (38 pages)  
-**Intermediaries:** Stockbroker · Depository · Listed Company · Investment Adviser · Fiduciary
+### Regulatory corpus and intermediary category
+
+| | |
+|---|---|
+| **Primary intermediary** | **Stockbroker** (also supports depository, RTA, investment adviser, listed company, portfolio manager) |
+| **Primary corpus** | **SEBI Master Circular for Stock Brokers** — 399 pages, June 2025 |
+| **Secondary corpus** | SEBI Master Circular for Investment Advisers (99 pages, Feb 2026) · SEBI Master Circular on Surveillance of Securities Market (38 pages) |
+| **Source** | Fetched live from sebi.gov.in — `python scripts/fetch_sebi_corpus.py` |
+
+Both corpora PS2 suggests are downloaded by that script, so the corpus is
+reproducible rather than a file that happened to be on disk.
+
+A separate **synthetic corpus of 5 SEBI-format circulars** (`data/corpus/`) provides
+the *labelled training data* for the local classifier — every clause carries
+ground-truth labels by construction. It is training data, not the regulatory
+corpus, and the model is scored on documents held out of it.
+
+### Measured performance
+
+| Test | Result |
+|---|---|
+| Obligation extraction, circulars **held out of training** | precision **1.00** · recall **0.93** |
+| Non-circular documents (contract, press release, manual, paper) | rejected at **2–3%** confidence |
+| SEBI Master Circular for Stock Brokers (399 pp, unseen) | **1,391** obligations from 5,151 sentences · 7s |
+| SEBI Master Circular for Investment Advisers (99 pp, unseen) | **238** obligations · 1s |
+| Regulatory-change scenario (amendment vs circular in force) | 2 NEW · 7 MODIFIED detected, with the changed field named |
+| Full pipeline with the LLM provider **down** | still returns every obligation |
+
+Reproduce with `python scripts/evaluate_model.py` and `python scripts/demo_scenario.py`.
 
 ---
 
@@ -208,18 +235,34 @@ Sample obligations extracted by the pipeline:
 
 ## Problem Statement compliance
 
-| Requirement | Status |
-|-------------|--------|
-| Regulatory text → operational action | ✅ Extraction Agent + Mapping Agent |
-| Works on SEBI circulars | ✅ Tested on 38-page Master Circular |
-| Specifies intermediary category | ✅ Stockbroker, Depository, Listed Co., Investment Adviser |
-| Specifies regulatory corpus | ✅ SEBI Master Circular on Surveillance |
-| Concrete regulatory scenario demo | ✅ demo_report.html |
-| Dynamic regulatory translation | ✅ Diff Agent: NEW / MODIFIED / SUPERSEDED |
-| Ongoing compliance management | ✅ Evidence gaps, per-intermediary dashboards |
-| Auditability | ✅ Every step logged with timestamp + clause reference |
-| Evidence mapping | ✅ `/api/v1/evidence/upload` — keyword match |
-| Measurable performance | ✅ metrics.json — time per step, obligations/page |
+| Requirement | Status | Evidence |
+|-------------|--------|----------|
+| Specifies intermediary category | ✅ | **Stockbroker** primary, 5 more supported |
+| Specifies regulatory corpus | ✅ | SEBI Master Circular for Stock Brokers (399 pp) + Investment Advisers (99 pp), fetched live |
+| Concrete regulatory scenario | ✅ | `scripts/demo_scenario.py` — amendment vs circular in force, end to end in 6s |
+| **Challenge 1** — dynamic regulatory translation | ✅ | Diff Agent classifies NEW / MODIFIED / SUPERSEDED and names the changed field (`deadline: 'within 30 days' → 'within 15 days'`) |
+| Regulatory text → machine-actionable rules | ✅ | Typed `Obligation` schema + NetworkX graph + REST API |
+| Maps to operational processes | ✅ | Action items per intermediary and per role, with generated SOP steps |
+| **Challenge 2** — ongoing compliance management | ✅ | Evidence checklists, red/yellow/green gap status, risk-scored urgency queue |
+| Evidence mapping | ✅ | `/api/v1/evidence/*` — per-obligation checklist and gap detection |
+| Audit trail | ✅ | Every pipeline step timestamped in `data/audit_log.json` |
+| Reduces issuance→action gap | ✅ | `scheduler/sebi_fetcher.py` scrapes SEBI's listing pages and auto-ingests new circulars |
+| Measurable performance | ✅ | `scripts/evaluate_model.py` — P/R against ground truth, held-out documents |
+| Accuracy | ✅ | precision 1.00 / recall 0.93 on unseen circulars; non-circulars rejected at 2–3% |
+| Auditability of the AI itself | ✅ | Every obligation carries its confidence, the n-grams that drove the decision, and the rule that set its severity |
+| Resilience | ✅ | Runs end to end with no LLM and no API key (`EXTRACTION_MODE=ml`) |
+
+### Known limitations (stated deliberately)
+
+- The severity classifier scores 0.52 on held-out templates, so severity is decided
+  **rule-first** (prohibition, hard deadline, penalty language) with the model only
+  breaking ties. Each obligation reports which decided it.
+- The synthetic training corpus is template-generated, so the sentence-level F1 of
+  1.00 in the model card is an upper bound. The held-out-document numbers above are
+  the honest measure.
+- On a 399-page master circular the local model extracts 1,391 candidate obligations;
+  that is a review queue, not a final answer — the confidence score and the rejected-
+  borderline list exist so an analyst can triage it.
 
 ---
 

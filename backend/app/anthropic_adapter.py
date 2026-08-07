@@ -3,10 +3,102 @@ Anthropic API Adapter - Makes OpenRouter calls look like Anthropic calls
 Allows existing code to work with both providers without modification.
 """
 import logging
-from typing import Any, Optional
+import threading
+from typing import Any, List, Optional
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class KeyRotator:
+    """
+    Holds the OpenRouter keys and moves to the next one when the current is spent.
+
+    The free tier allows 50 requests/day per key, and a single large circular can
+    exhaust that mid-run. Rather than failing the run, the adapter rotates to the
+    next configured key. State is process-wide and lock-protected because
+    extraction fans out across a thread pool — without that, every worker thread
+    would independently rediscover that the same key is dead.
+    """
+
+    _instance: Optional["KeyRotator"] = None
+    _class_lock = threading.Lock()
+
+    def __init__(self, keys: List[str]):
+        self._keys = list(keys)
+        self._index = 0
+        self._exhausted: set = set()
+        self._lock = threading.Lock()
+
+    @classmethod
+    def get(cls) -> "KeyRotator":
+        if cls._instance is None:
+            with cls._class_lock:
+                if cls._instance is None:
+                    cls._instance = cls(get_settings().OPENROUTER_API_KEYS)
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Drop cached state — used by tests and after changing configuration."""
+        with cls._class_lock:
+            cls._instance = None
+
+    @property
+    def keys(self) -> List[str]:
+        return list(self._keys)
+
+    def current(self) -> Optional[str]:
+        with self._lock:
+            return self._keys[self._index] if self._index < len(self._keys) else None
+
+    def mark_exhausted(self, key: str) -> Optional[str]:
+        """
+        Retire `key` and return the next usable one, or None when all are spent.
+        """
+        with self._lock:
+            if key in self._exhausted:
+                # Another thread already rotated past this key.
+                return self._keys[self._index] if self._index < len(self._keys) else None
+            self._exhausted.add(key)
+            masked = f"{key[:12]}…{key[-4:]}" if len(key) > 20 else "key"
+            while self._index < len(self._keys) and self._keys[self._index] in self._exhausted:
+                self._index += 1
+            if self._index < len(self._keys):
+                nxt = self._keys[self._index]
+                logger.warning(
+                    f"OpenRouter key {masked} is exhausted — switching to key "
+                    f"{self._index + 1} of {len(self._keys)}"
+                )
+                return nxt
+            logger.error(
+                f"OpenRouter key {masked} is exhausted and no backup keys remain "
+                f"({len(self._keys)} configured). Set OPENROUTER_API_KEY_BACKUP, "
+                f"or run with EXTRACTION_MODE=ml to continue without the LLM."
+            )
+            return None
+
+    def status(self) -> dict:
+        with self._lock:
+            return {
+                "keys_configured": len(self._keys),
+                "active_key_index": self._index if self._index < len(self._keys) else None,
+                "keys_exhausted": len(self._exhausted),
+                "keys_remaining": max(0, len(self._keys) - self._index),
+            }
+
+
+def _is_key_exhausted_error(exc: Exception) -> bool:
+    """True for the failures that another key could plausibly survive."""
+    status = getattr(exc, "status_code", None) or getattr(
+        getattr(exc, "response", None), "status_code", None)
+    if status in (401, 402, 429):
+        return True
+    text = str(exc).lower()
+    return any(s in text for s in (
+        "rate limit", "quota", "insufficient credit", "free-models-per-day",
+        "invalid api key", "no auth credentials",
+    ))
 
 
 class AnthropicAdapter:
@@ -15,9 +107,10 @@ class AnthropicAdapter:
     Allows using OpenRouter with code written for Anthropic SDK.
     """
     
-    def __init__(self, openai_client: Any):
+    def __init__(self, openai_client: Any, rotate: bool = True):
         self.client = openai_client
         self.settings = get_settings()
+        self._rotate = rotate
     
     def __getattr__(self, name):
         """Pass through attributes to the underlying client."""
@@ -26,15 +119,16 @@ class AnthropicAdapter:
     @property
     def messages(self):
         """Provide Anthropic-style messages interface."""
-        return MessageAPI(self.client, self.settings)
+        return MessageAPI(self.client, self.settings, rotate=self._rotate)
 
 
 class MessageAPI:
     """Provides Anthropic-style messages.create() interface for OpenAI client."""
-    
-    def __init__(self, client: Any, settings: Any):
+
+    def __init__(self, client: Any, settings: Any, rotate: bool = True):
         self.client = client
         self.settings = settings
+        self._rotate = rotate
     
     def create(self, **kwargs) -> "AnthropicMessage":
         """
@@ -63,21 +157,44 @@ class MessageAPI:
         if system:
             messages = [{"role": "system", "content": system}] + messages
         
+        # Try the active key; on a quota/auth failure rotate to the next configured
+        # key and retry, so one exhausted free-tier key does not end the run.
+        rotator = KeyRotator.get() if self._rotate else None
+        attempts = len(rotator.keys) if rotator else 1
+
+        last_exc: Optional[Exception] = None
+        for _ in range(max(attempts, 1)):
+            try:
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=timeout,
+                )
+                return AnthropicMessage(response)
+            except Exception as e:
+                last_exc = e
+                if not (rotator and _is_key_exhausted_error(e)):
+                    logger.error(f"OpenRouter API call failed: {e}")
+                    raise
+                spent = getattr(self.client, "api_key", None)
+                next_key = rotator.mark_exhausted(spent) if spent else None
+                if not next_key:
+                    logger.error(f"OpenRouter API call failed, no keys left: {e}")
+                    raise
+                self._swap_key(next_key)
+
+        raise last_exc if last_exc else RuntimeError("OpenRouter call failed")
+
+    def _swap_key(self, key: str) -> None:
+        """Point this client at a different API key, in place."""
         try:
-            # Call OpenAI/OpenRouter API
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=timeout,
-            )
-            
-            # Convert to Anthropic response format
-            return AnthropicMessage(response)
-        except Exception as e:
-            logger.error(f"OpenRouter API call failed: {e}")
-            raise
+            self.client.api_key = key
+        except Exception:            # older SDKs expose it read-only
+            from openai import OpenAI
+            self.client = OpenAI(api_key=key,
+                                 base_url=self.settings.OPENROUTER_BASE_URL)
 
 
 class AnthropicMessage:
@@ -177,13 +294,20 @@ def create_anthropic_compatible_client(provider: str, **kwargs) -> Any:
     
     elif provider.lower() == "openrouter":
         from openai import OpenAI
-        if not settings.OPENROUTER_API_KEY:
-            raise ValueError("OPENROUTER_API_KEY not set")
-        
-        openai_client = OpenAI(
-            api_key=settings.OPENROUTER_API_KEY,
-            base_url=settings.OPENROUTER_BASE_URL
+
+        rotator = KeyRotator.get()
+        active = rotator.current()
+        if not active:
+            raise ValueError(
+                "No usable OPENROUTER_API_KEY. Set one in .env (optionally several, "
+                "comma-separated, or via OPENROUTER_API_KEY_BACKUP), or run with "
+                "EXTRACTION_MODE=ml to use the local model only."
+            )
+        logger.info(
+            f"OpenRouter client using key {rotator.status()['active_key_index'] + 1} "
+            f"of {len(rotator.keys)}"
         )
+        openai_client = OpenAI(api_key=active, base_url=settings.OPENROUTER_BASE_URL)
         return AnthropicAdapter(openai_client)
     
     else:

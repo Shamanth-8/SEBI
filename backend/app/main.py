@@ -10,6 +10,9 @@ from app.api import evidence as evidence_api
 from app.api import audit_api
 from app.api import extended as extended_api
 from app.api import notifications as notifications_api
+from app.api import health as health_api
+from app.api import intelligence as intelligence_api
+from app.api import chat as chat_api
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +43,9 @@ app.include_router(evidence_api.router, prefix="/api/v1/evidence", tags=["Eviden
 app.include_router(audit_api.router, prefix="/api/v1/audit", tags=["Audit"])
 app.include_router(extended_api.router, prefix="/api/v1", tags=["Extended"])
 app.include_router(notifications_api.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(health_api.router, prefix="/api/v1/health", tags=["Health"])
+app.include_router(intelligence_api.router, prefix="/api/v1/intel", tags=["Document Intelligence"])
+app.include_router(chat_api.router, prefix="/api/v1/chat", tags=["Chat"])
 
 
 @app.get("/health")

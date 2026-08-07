@@ -6,6 +6,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from app.agents.orchestrator import RegGraphOrchestrator
 from app.models.obligation import CircularMetadata, ChangeImpactReport
+from app.llm_errors import LLMError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,10 @@ class CircularResponse(BaseModel):
     superseded_obligations_count: int
     impact_score: float
     risk_level: str
+    # Lets the UI distinguish "found 0 obligations" from "0 because the LLM failed"
+    chunks_total: int = 0
+    chunks_failed: int = 0
+    llm_error: Optional[str] = None
 
 
 @router.post("/upload")
@@ -57,17 +62,27 @@ async def upload_circular(request: CircularUploadRequest) -> CircularResponse:
             intermediary_types=request.intermediary_types
         )
         
+        chunks_failed = result.get('chunks_failed', 0)
+
         return CircularResponse(
             circular_id=request.circular_id,
-            status="processed",
+            status="processed" if not chunks_failed else "processed_with_errors",
             extracted_obligations_count=len(result['extracted_obligations']),
             new_obligations_count=result['diff_result'].new_obligations_count if hasattr(result['diff_result'], 'new_obligations_count') else len(result['diff_result'].new_obligations),
             modified_obligations_count=len(result['diff_result'].modified_obligations),
             superseded_obligations_count=len(result['diff_result'].superseded_obligations),
             impact_score=result['impact_report'].overall_impact_score,
-            risk_level=result['impact_report'].risk_level
+            risk_level=result['impact_report'].risk_level,
+            chunks_total=result.get('chunks_total', 0),
+            chunks_failed=chunks_failed,
+            llm_error=result.get('llm_error'),
         )
-        
+
+    except LLMError as e:
+        # The model is unreachable/misconfigured — report it as such rather than
+        # returning a "successful" run with zero obligations.
+        logger.error(f"LLM failure processing circular: {e}")
+        raise HTTPException(status_code=502, detail=f"LLM error: {e}")
     except Exception as e:
         logger.error(f"Error processing circular: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -89,13 +104,24 @@ async def upload_circular_file(
             # Use pdfplumber for PDF extraction
             import pdfplumber, io
             document_text = ""
-            with pdfplumber.open(io.BytesIO(content)) as pdf:
-                for page in pdf.pages:
-                    t = page.extract_text()
-                    if t:
-                        document_text += t + "\n"
+            try:
+                with pdfplumber.open(io.BytesIO(content)) as pdf:
+                    for page in pdf.pages:
+                        t = page.extract_text()
+                        if t:
+                            document_text += t + "\n"
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not read PDF '{filename}': {e}. "
+                           "If it is password-protected, remove the protection and retry.",
+                )
             if not document_text.strip():
-                raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No text layer found in '{filename}'. This looks like a scanned "
+                           "image PDF — OCR it first, or paste the text manually.",
+                )
         else:
             # Try UTF-8 then fall back to latin-1 for plain text
             try:

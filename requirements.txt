@@ -22,3 +22,8 @@ pyvis==0.3.2
 pdfplumber==0.11.4
 apscheduler==3.10.4
 beautifulsoup4==4.12.3
+# Local model: trains and runs the offline obligation classifier (app/ml)
+scikit-learn==1.9.0
+joblib==1.5.3
+# Renders the synthetic SEBI circular corpus to PDF (scripts/generate_corpus.py)
+reportlab==5.0.0

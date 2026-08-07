@@ -86,5 +86,11 @@ def enrich_all(graph) -> None:
     Call this after any pipeline run or evidence update.
     """
     for obl_id, obl in graph.obligation_map.items():
-        dep_count = len(list(graph.graph.successors(obl_id)))
+        # obligation_map and the networkx graph can drift apart (an obligation
+        # recorded but never added as a node, or a stale pickle). A missing node
+        # means no known dependents — not a reason to abort the whole run.
+        dep_count = (
+            len(list(graph.graph.successors(obl_id)))
+            if graph.graph.has_node(obl_id) else 0
+        )
         enrich_obligation_risk(obl, dep_count)

@@ -1,0 +1,31 @@
+# Keep the build context small — without this the whole venv and the downloaded
+# SEBI PDFs are shipped to the daemon on every build.
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+.git/
+.gitignore
+.claude/
+
+# Regenerated inside the image by scripts/generate_corpus.py + train_model.py
+data/
+cache/
+
+# Large source PDFs — fetched at runtime with scripts/fetch_sebi_corpus.py
+*.pdf
+
+# Local-only config; supply real values as container env vars
+.env
+.env.local
+
+# Docs and dashboards not needed by the backend image
+*.md
+!README.md
+frontend/
+lib/
+regraph/
+demo_report.html

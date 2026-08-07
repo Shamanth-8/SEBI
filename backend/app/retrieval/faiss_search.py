@@ -18,7 +18,10 @@ class FAISSRetrieval:
     
     def __init__(self, index_path: str = "./data/faiss_index"):
         self.index_path = index_path
-        self.client = Anthropic()
+        # Lazy: Anthropic() raises when ANTHROPIC_API_KEY is unset, which would
+        # stop the application from starting even though retrieval falls back to
+        # a local similarity search perfectly well without it.
+        self._client = None
         self.embeddings = {}  # obligation_id -> embedding vector
         self.clause_index = {}  # embedding hash -> clause metadata
         
@@ -32,6 +35,17 @@ class FAISSRetrieval:
         except ImportError:
             logger.warning("FAISS not available. Using similarity fallback.")
     
+    @property
+    def client(self):
+        """Anthropic client, built on first use. None when no key is configured."""
+        if self._client is None:
+            try:
+                self._client = Anthropic()
+            except Exception as exc:
+                logger.debug(f"Anthropic client unavailable for embeddings: {exc}")
+                return None
+        return self._client
+
     def _load_or_create_index(self):
         """Load existing FAISS index or create new one."""
         if os.path.exists(self.index_path):

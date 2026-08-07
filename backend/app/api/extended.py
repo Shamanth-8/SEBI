@@ -423,3 +423,21 @@ async def get_copilot_summary():
     if not summary:
         return {"message": "No circular processed yet. Run the pipeline first."}
     return summary
+
+
+@router.get("/copilot/pre-ai")
+async def get_pre_ai_insights():
+    """Local (pre-LLM) analysis from the last pipeline run."""
+    data = orchestrator.get_pre_ai_insights()
+    if not data:
+        return {"message": "No circular processed yet. Run the pipeline first."}
+    return data
+
+
+@router.get("/copilot/ai-insights")
+async def get_ai_insights():
+    """LLM insight layer from the last pipeline run, grounded on the local analysis."""
+    data = orchestrator.get_ai_insights()
+    if not data:
+        return {"message": "No circular processed yet. Run the pipeline first."}
+    return data

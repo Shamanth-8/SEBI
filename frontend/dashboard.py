@@ -14,6 +14,8 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+import intel_views
+
 st.set_page_config(
     page_title="RegGraph — Agentic Compliance",
     page_icon="🏛",
@@ -22,6 +24,10 @@ st.set_page_config(
 )
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
+# A full run has historically taken far longer than the old 600s client timeout,
+# which made the browser give up while the backend was still working — visually
+# indistinguishable from "nothing happened".
+PIPELINE_TIMEOUT = float(os.getenv("PIPELINE_TIMEOUT", "3600"))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DESIGN SYSTEM — injected once at startup
@@ -494,11 +500,21 @@ def _parse_metadata(text: str):
             break
     if not circular_id:
         circular_id = f"SEBI_CIRCULAR_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     title = ""
+    subj_re = re.compile(r'^(sub|subject|re)\s*[:\-]\s*(.+)', re.IGNORECASE)
     for line in lines[:25]:
-        if line.lower().startswith("sub:"):
-            title = line[4:].strip()
+        m = subj_re.match(line)
+        if m:
+            title = m.group(2).strip()
             break
+    if not title:
+        # Fall back to the first substantive line, skipping short/ALL-CAPS
+        # letterhead or logo lines that don't carry the actual title.
+        for line in lines[1:25]:
+            if len(line) >= 15 and not line.isupper():
+                title = line
+                break
     if not title and len(lines) > 1:
         title = lines[1]
     return circular_id, title
@@ -558,9 +574,9 @@ def show_upload_page():
 <div class="rg-card anim-fade-in" style="border-color:var(--accent);margin-bottom:16px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
-      <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Last Run</span><br>
+      <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Previous Run (not the file below)</span><br>
       <span style="font-weight:600;color:var(--accent-lt)">{p.get("circular_title","—")[:70]}</span>
-      <span style="font-size:0.78rem;color:var(--muted);margin-left:8px">{p.get("ran_at","")}</span>
+      <span style="font-size:0.78rem;color:var(--muted);margin-left:8px">{p.get("circular_id","—")[:45]} · {p.get("ran_at","")}</span>
     </div>
     <div style="display:flex;gap:16px;font-size:0.85rem">
       <span>📋 <b style="color:var(--accent-lt)">{p.get("n_extracted",0)}</b> extracted</span>
@@ -570,7 +586,7 @@ def show_upload_page():
   </div>
 </div>""", unsafe_allow_html=True)
         with st.expander("📊 View full last run results"):
-            _show_pipeline_result(p)
+            _show_pipeline_result(p, nested=True)
         st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
 
     uploaded_file = st.file_uploader("Drop circular PDF here", type=["pdf", "txt"])
@@ -584,22 +600,51 @@ def show_upload_page():
             # Genuinely new file — read, extract, cache
             raw = uploaded_file.read()
             fname = uploaded_file.name or ""
+            read_error = ""
             with st.spinner("Reading file…"):
                 if fname.lower().endswith(".pdf"):
-                    text = _extract_pdf_text(raw)
+                    # Must not be unguarded: an encrypted or malformed PDF used to
+                    # raise here and kill the whole page before the uploader, the
+                    # metadata fields and the Run button were ever rendered.
+                    try:
+                        text = _extract_pdf_text(raw)
+                    except Exception as exc:
+                        text = ""
+                        read_error = f"Could not read this PDF: {exc}"
                 else:
                     try:
                         text = raw.decode("utf-8")
                     except UnicodeDecodeError:
                         text = raw.decode("latin-1")
             auto_id, auto_title = _parse_metadata(text)
-            st.session_state["upload_file_key"]   = file_key
-            st.session_state["upload_file_bytes"] = raw
-            st.session_state["upload_doc_text"]   = text
-            st.session_state["upload_filename"]   = fname
-            st.session_state["upload_auto_id"]    = auto_id
-            st.session_state["upload_auto_title"] = auto_title
-        st.success(f"✅ Read **{len(st.session_state['upload_doc_text']):,} characters** from `{st.session_state['upload_filename']}`")
+            st.session_state["upload_file_key"]    = file_key
+            st.session_state["upload_file_bytes"]  = raw
+            st.session_state["upload_doc_text"]    = text
+            st.session_state["upload_filename"]    = fname
+            st.session_state["upload_auto_id"]     = auto_id
+            st.session_state["upload_auto_title"]  = auto_title
+            st.session_state["upload_read_error"]  = read_error
+            # Point the editable fields at the NEW file's metadata, and drop the
+            # previous run's result card so stale numbers can't look current.
+            st.session_state["circular_id_input"]    = auto_id
+            st.session_state["circular_title_input"] = auto_title
+            st.session_state.pop("last_pipeline", None)
+            st.rerun()
+
+        read_error = st.session_state.get("upload_read_error", "")
+        cached_text = st.session_state.get("upload_doc_text", "")
+        if read_error:
+            st.error(f"❌ {read_error}")
+            st.caption("If the PDF is password-protected, remove the protection and re-upload, "
+                       "or paste the text manually below.")
+        elif not cached_text.strip():
+            st.error(
+                f"❌ No text layer found in `{st.session_state.get('upload_filename','')}` — "
+                "this looks like a scanned/image PDF, so there is nothing to extract."
+            )
+            st.caption("Run it through OCR first, or paste the circular text manually below.")
+        else:
+            st.success(f"✅ Read **{len(cached_text):,} characters** from `{st.session_state['upload_filename']}`")
 
     # Restore from cache (survives rerenders from widget interactions)
     file_bytes = st.session_state.get("upload_file_bytes", b"")
@@ -608,24 +653,33 @@ def show_upload_page():
     auto_id    = st.session_state.get("upload_auto_id",    "")
     auto_title = st.session_state.get("upload_auto_title", "")
 
-    # If no file cached, show text area fallback
-    if not file_bytes:
-        doc_text = st.text_area("Or paste circular text", height=120,
-                                placeholder="Paste full circular text here…",
-                                value=doc_text)
-        if doc_text.strip():
+    # Show the paste fallback whenever we have no usable text — including when a
+    # file was uploaded but yielded nothing (scanned PDF / unreadable file).
+    if not doc_text.strip():
+        pasted = st.text_area("Or paste circular text", height=120,
+                              placeholder="Paste full circular text here…",
+                              value=doc_text)
+        if pasted.strip():
+            doc_text = pasted
             auto_id, auto_title = _parse_metadata(doc_text)
             st.session_state["upload_doc_text"]   = doc_text
             st.session_state["upload_auto_id"]    = auto_id
             st.session_state["upload_auto_title"] = auto_title
+            st.session_state.setdefault("circular_id_input", auto_id)
+            st.session_state.setdefault("circular_title_input", auto_title)
     elif uploaded_file is None and file_bytes:
         st.info(f"📄 Using cached: `{filename}` ({len(doc_text):,} chars) — ready to run.")
 
+    # Keyed widgets: without an explicit key these did not reliably refresh when a
+    # new file replaced a cached one, so the fields kept showing the old circular.
+    st.session_state.setdefault("circular_id_input", auto_id)
+    st.session_state.setdefault("circular_title_input", auto_title)
+
     col1, col2 = st.columns(2)
     with col1:
-        circular_id = st.text_input("Circular ID", value=auto_id)
+        circular_id = st.text_input("Circular ID", key="circular_id_input")
     with col2:
-        circular_title = st.text_input("Title", value=auto_title)
+        circular_title = st.text_input("Title", key="circular_title_input")
 
     intermediary_types = st.multiselect(
         "Intermediary types",
@@ -641,11 +695,22 @@ def show_upload_page():
         if st.button("🚀 Run Agent Pipeline", type="primary", disabled=not can_run, use_container_width=True):
             _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, intermediary_types)
     with col_clear:
-        if st.button("🗑 Clear", use_container_width=True, disabled=not file_bytes):
+        if st.button("🗑 Clear", use_container_width=True, disabled=not (file_bytes or doc_text)):
             for k in ["upload_file_bytes", "upload_doc_text", "upload_filename",
-                      "upload_auto_id", "upload_auto_title", "upload_file_key"]:
+                      "upload_auto_id", "upload_auto_title", "upload_file_key",
+                      "upload_read_error", "circular_id_input", "circular_title_input",
+                      "last_pipeline"]:
                 st.session_state.pop(k, None)
             st.rerun()
+
+    # Say *why* the button is disabled instead of leaving it silently greyed out.
+    if not can_run:
+        missing = []
+        if not doc_text.strip():
+            missing.append("circular text (upload a text-based PDF/TXT or paste it above)")
+        if not circular_id.strip():
+            missing.append("a Circular ID")
+        st.caption(f"⚠️ Run is disabled — still needs: {', '.join(missing)}.")
 
 
 def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, intermediary_types):
@@ -677,7 +742,7 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
                 data={"circular_id": circular_id, "title": circular_title,
                       "intermediary_types": ",".join(intermediary_types)},
                 files={"file": (filename, file_bytes, "application/pdf")},
-                timeout=600.0,
+                timeout=PIPELINE_TIMEOUT,
             )
         else:
             render(1); step_results[0] = "Text chunked into sections"
@@ -685,11 +750,22 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
                 f"{API_BASE_URL}/circulars/upload",
                 json={"circular_id": circular_id, "title": circular_title,
                       "document_text": doc_text, "intermediary_types": intermediary_types},
-                timeout=600.0,
+                timeout=PIPELINE_TIMEOUT,
             )
 
         if resp.status_code != 200:
-            render(0, error=resp.text[:300])
+            detail = resp.text[:500]
+            try:
+                detail = resp.json().get("detail", detail)
+            except Exception:
+                pass
+            render(0, error=str(detail)[:300])
+            if resp.status_code == 502:
+                st.error(f"🔌 The language model could not be reached — nothing was extracted.\n\n{detail}")
+                st.caption("Check `GET /api/v1/health/llm` for the exact cause "
+                           "(wrong model id, bad key, or daily quota exhausted).")
+            else:
+                st.error(f"❌ Upload failed (HTTP {resp.status_code}): {detail}")
             return
 
         result      = resp.json()
@@ -698,6 +774,24 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
         n_mod       = result.get("modified_obligations_count", 0)
         n_sup       = result.get("superseded_obligations_count", 0)
         risk_level  = result.get("risk_level", "medium")
+        chunks_failed = result.get("chunks_failed", 0)
+        chunks_total  = result.get("chunks_total", 0)
+        llm_error     = result.get("llm_error")
+
+        # A run that extracted nothing is a failure to report, not a success to
+        # celebrate — this used to render as a green "complete" with zeros.
+        if chunks_failed:
+            st.warning(
+                f"⚠️ {chunks_failed} of {chunks_total} sections failed to process. "
+                f"Results are incomplete.\n\nLast error: {llm_error}"
+            )
+        if n_extracted == 0:
+            st.error(
+                "❌ Zero obligations were extracted. "
+                + (f"The model reported: {llm_error}" if llm_error
+                   else "The model returned no obligations for this document.")
+            )
+            st.caption("Check `GET /api/v1/health/llm` to confirm the model is reachable.")
 
         step_results[1] = f"{n_extracted} obligations extracted"
         step_results[2] = f"NEW={n_new}  MODIFIED={n_mod}  SUPERSEDED={n_sup}"
@@ -714,11 +808,16 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
             f'<div class="kpi-card"><div class="kpi-val" style="color:var(--muted)">{n_sup}</div><div class="kpi-lbl">SUPERSEDED</div></div>'
             f'</div>', unsafe_allow_html=True
         )
-        st.toast(f"✅ Pipeline complete — {n_extracted} obligations, {n_new} new, {n_mod} modified", icon="🏛")
+        if n_extracted:
+            st.toast(f"✅ Pipeline complete — {n_extracted} obligations, {n_new} new, {n_mod} modified", icon="🏛")
 
         # ── Save everything to session_state so it survives page navigation ──
         copilot = api_get("/copilot/summary", timeout=10)
+        pre_ai  = api_get("/copilot/pre-ai", timeout=15)
+        ai_ins  = api_get("/copilot/ai-insights", timeout=15)
         st.session_state["last_pipeline"] = {
+            "pre_ai":  pre_ai if not has_error(pre_ai) else None,
+            "ai_insights": ai_ins if not has_error(ai_ins) else None,
             "circular_id":        circular_id,
             "circular_title":     circular_title,
             "filename":           filename,
@@ -735,12 +834,25 @@ def _run_pipeline(circular_id, circular_title, doc_text, file_bytes, filename, i
         st.markdown('<hr class="rg-divider">', unsafe_allow_html=True)
         _show_pipeline_result(st.session_state["last_pipeline"])
 
+    except httpx.TimeoutException:
+        render(0, error=f"Timed out after {PIPELINE_TIMEOUT:.0f}s")
+        st.error(
+            f"⏱ The backend did not respond within {PIPELINE_TIMEOUT:.0f}s. "
+            "It may still be processing — check the backend logs and "
+            "`GET /api/v1/audit/trail` before re-running, so you don't double-process."
+        )
     except Exception as exc:
         render(0, error=str(exc))
+        st.error(f"❌ Pipeline failed: {exc}")
 
 
-def _show_pipeline_result(p: dict):
-    """Render pipeline result card — called both inline and on return to Upload page."""
+def _show_pipeline_result(p: dict, nested: bool = False):
+    """Render pipeline result card — called both inline and on return to Upload page.
+
+    nested=True when the caller has already opened an st.expander around this
+    (Streamlit forbids nesting expanders), so the audit trail renders in a
+    plain container instead of its own expander.
+    """
     circular_id = p.get("circular_id", "")
     n_extracted = p.get("n_extracted", 0)
     risk_level  = p.get("risk_level", "medium")
@@ -799,7 +911,29 @@ def _show_pipeline_result(p: dict):
         risk_icon = "🔴" if risk_level == "high" else "🟡" if risk_level == "medium" else "🟢"
         st.info(f"{risk_icon} Risk level: **{risk_level.upper()}** · {n_extracted} obligations extracted and saved to graph.")
 
-    with st.expander("🔒 Audit trail for this run"):
+    # ── Two-layer intelligence: local analysis first, then the AI layer ──────
+    pre_ai = p.get("pre_ai")
+    ai_ins = p.get("ai_insights")
+    if pre_ai or ai_ins:
+        tab_local, tab_ai = st.tabs([
+            "🧠 Local analysis (no LLM)", "🤖 AI insights (LLM layer)",
+        ])
+        with tab_local:
+            if pre_ai:
+                st.caption("Computed by the trained model before any LLM call — same input "
+                           "always gives the same output.")
+                intel_views.render_pre_ai_block(pre_ai)
+            else:
+                st.info("No local analysis was recorded for this run.")
+        with tab_ai:
+            intel_views.render_ai_block(ai_ins or {})
+
+    if nested:
+        st.markdown("**🔒 Audit trail for this run**")
+        audit_ctx = st.container()
+    else:
+        audit_ctx = st.expander("🔒 Audit trail for this run")
+    with audit_ctx:
         ar = api_get(f"/audit/trail?circular_id={circular_id}", timeout=10)
         for e in ar.get("entries", []):
             ts  = e.get("timestamp","")[:19]
@@ -1710,6 +1844,8 @@ def main():
                 menu_title=None,
                 options=[
                     "Upload Circular",
+                    "Document Intelligence",
+                    "Ask the Circular",
                     "Dashboard",
                     "Obligations",
                     "Graph",
@@ -1720,6 +1856,8 @@ def main():
                 ],
                 icons=[
                     "upload",
+                    "cpu",
+                    "chat-dots",
                     "speedometer2",
                     "list-check",
                     "diagram-3",
@@ -1752,7 +1890,8 @@ def main():
         except ImportError:
             page = st.radio(
                 "Navigation",
-                ["Upload Circular", "Dashboard", "Obligations", "Graph",
+                ["Upload Circular", "Document Intelligence", "Ask the Circular",
+                 "Dashboard", "Obligations", "Graph",
                  "Compliance", "Evidence Gaps", "Actions", "Audit Trail"],
                 label_visibility="collapsed",
             )
@@ -1774,6 +1913,10 @@ def main():
     # ── Page routing ────────────────────────────────────────────────────────
     if page == "Upload Circular":
         show_upload_page()
+    elif page == "Document Intelligence":
+        intel_views.render_intelligence_page(intermediary_type)
+    elif page == "Ask the Circular":
+        intel_views.render_chat_page()
     elif page == "Dashboard":
         show_overview_page(intermediary_type)
     elif page == "Obligations":

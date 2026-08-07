@@ -21,11 +21,20 @@ class SemanticDiffAgent:
     
     def __init__(self, obligation_graph: ObligationGraph):
         settings = get_settings()
-        self.client = create_anthropic_compatible_client(settings.LLM_PROVIDER)
         self.settings = settings
         self.model = self.settings.LLM_MODEL
         self.graph = obligation_graph
+        # Built on first use, not here: constructing it eagerly makes the whole
+        # application fail to import when no API key is configured, which defeats
+        # the offline path entirely (the container would not even start).
+        self._client = None
         logger.info(f"Initialized diff agent with provider: {settings.LLM_PROVIDER}, model: {self.model}")
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = create_anthropic_compatible_client(self.settings.LLM_PROVIDER)
+        return self._client
     
     def diff_obligations(
         self,
@@ -50,7 +59,15 @@ class SemanticDiffAgent:
             )
         
         logger.info(f"Performing semantic diff: {len(new_obligations)} new vs {len(existing_obligations)} existing")
-        
+
+        # EXTRACTION_MODE=ml means "no network calls anywhere in the pipeline".
+        # Going straight to the lexical diff keeps that promise (and is far faster
+        # than waiting for calls that are only going to fail).
+        from app.config import get_settings
+        if (get_settings().EXTRACTION_MODE or "").lower() == "ml":
+            logger.info("EXTRACTION_MODE=ml — using the deterministic lexical diff")
+            return self.lexical_diff(new_obligations, existing_obligations)
+
         # Call Claude to perform semantic matching
         new_obl_summaries = self._prepare_obligation_summaries(new_obligations)
         existing_obl_summaries = self._prepare_obligation_summaries(existing_obligations)
@@ -61,8 +78,125 @@ class SemanticDiffAgent:
             new_obligations,
             existing_obligations
         )
-        
+
+        # The LLM diff returns an empty result on any failure (quota, bad JSON).
+        # Reporting "0 new, 0 modified" for a circular that clearly contains
+        # obligations is worse than useless — it looks like a successful no-op.
+        # Fall back to a deterministic lexical diff so the pipeline still tells
+        # the truth about what changed.
+        if not (diff_result.new_obligations or diff_result.modified_obligations
+                or diff_result.superseded_obligations):
+            logger.warning(
+                "Semantic diff produced no classification — falling back to lexical diff"
+            )
+            diff_result = self.lexical_diff(new_obligations, existing_obligations)
+
         return diff_result
+
+    # ── Deterministic fallback ───────────────────────────────────────────────
+
+    def lexical_diff(
+        self,
+        new_obligations: List[Obligation],
+        existing_obligations: List[Obligation],
+        modified_at: float = 0.62,
+        duplicate_at: float = 0.92,
+    ) -> DiffResult:
+        """
+        Classify NEW / MODIFIED without an LLM, using TF-IDF cosine similarity
+        over the clause text.
+
+        Thresholds: above `duplicate_at` the clause is a restatement of one already
+        in the graph (a re-upload of the same circular) and is not reported as a
+        change; between the two it is a MODIFIED version of its closest match, with
+        the changed fields computed by direct comparison; below, it is NEW.
+        """
+        result = DiffResult()
+        if not new_obligations:
+            return result
+        if not existing_obligations:
+            result.new_obligations = list(new_obligations)
+            result.impact_score = 1.0
+            return result
+
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            logger.warning("scikit-learn unavailable — treating every obligation as NEW")
+            result.new_obligations = list(new_obligations)
+            result.impact_score = 1.0
+            return result
+
+        new_texts = [f"{o.title} {o.description}" for o in new_obligations]
+        old_texts = [f"{o.title} {o.description}" for o in existing_obligations]
+        try:
+            vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2),
+                                  sublinear_tf=True).fit(new_texts + old_texts)
+            sim = cosine_similarity(vec.transform(new_texts), vec.transform(old_texts))
+        except ValueError:
+            result.new_obligations = list(new_obligations)
+            result.impact_score = 1.0
+            return result
+
+        duplicates = 0
+        for i, obl in enumerate(new_obligations):
+            j = int(sim[i].argmax())
+            score = float(sim[i, j])
+            match = existing_obligations[j]
+
+            if score >= duplicate_at:
+                duplicates += 1
+                continue
+            if score >= modified_at:
+                changes = self._field_changes(match, obl)
+                if not changes:
+                    duplicates += 1
+                    continue
+                result.modified_obligations.append({
+                    "old_id": match.obligation_id,
+                    "new_obligation": obl,
+                    "changes": changes,
+                    "similarity": round(score, 3),
+                    "method": "lexical",
+                })
+            else:
+                result.new_obligations.append(obl)
+
+        total = len(new_obligations) or 1
+        result.impact_score = round(
+            min(1.0, (len(result.new_obligations) + 0.5 * len(result.modified_obligations))
+                / total), 3
+        )
+        logger.info(
+            f"Lexical diff: {len(result.new_obligations)} new, "
+            f"{len(result.modified_obligations)} modified, {duplicates} unchanged"
+        )
+        return result
+
+    @staticmethod
+    def _field_changes(old: Obligation, new: Obligation) -> List[str]:
+        """Human-readable list of what actually differs between two obligations."""
+        changes = []
+        if (old.deadline or "") != (new.deadline or ""):
+            changes.append(f"deadline: '{old.deadline or 'none'}' → '{new.deadline or 'none'}'")
+        if (old.deadline_type or "") != (new.deadline_type or ""):
+            changes.append(f"deadline type: {old.deadline_type} → {new.deadline_type}")
+        if old.severity != new.severity:
+            changes.append(f"severity: {old.severity} → {new.severity}")
+        if (old.responsible_party or "") != (new.responsible_party or ""):
+            changes.append(
+                f"responsible party: '{old.responsible_party}' → '{new.responsible_party}'")
+        added_types = set(new.intermediary_types) - set(old.intermediary_types)
+        removed_types = set(old.intermediary_types) - set(new.intermediary_types)
+        if added_types:
+            changes.append(f"now also applies to: {', '.join(sorted(added_types))}")
+        if removed_types:
+            changes.append(f"no longer applies to: {', '.join(sorted(removed_types))}")
+        added_ev = set(new.evidence_requirements) - set(old.evidence_requirements)
+        if added_ev:
+            changes.append(f"new evidence required: {', '.join(sorted(added_ev)[:2])}")
+        return changes
     
     def _prepare_obligation_summaries(self, obligations: List[Obligation]) -> str:
         """Prepare obligation summaries for LLM analysis."""

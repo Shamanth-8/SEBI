@@ -17,9 +17,17 @@ from app.agents.action_agent import generate_compliance_actions
 from app.agents.risk_calculator import enrich_all
 from app.agents.sop_agent import generate_sop
 from app.agents.copilot_agent import generate_copilot_summary
+from app.agents.ai_insights_agent import generate_ai_insights
+from app.agents.chat_agent import get_chat_agent
+from app.ml import insights as ml_insights
+from app.ml.extractor import (
+    extract_obligations_ml, link_by_similarity, merge_obligation_sets,
+)
+from app.ml.model import RegGraphModel
 from app.graph.obligation_graph import ObligationGraph
 from app.retrieval.faiss_search import FAISSRetrieval
 from app.audit import log_event
+from app.config import get_settings
 from app.metrics import record_pipeline_run, format_summary
 
 logger = logging.getLogger(__name__)
@@ -36,8 +44,14 @@ class RegGraphOrchestrator:
         self.graph = obligation_graph or ObligationGraph()
         self.graph.load()  # Try to load existing graph
         
-        # Initialize agents
-        self.extraction_agent = ObligationExtractionAgent()
+        # Initialize agents. The LLM extraction agent is optional: without it the
+        # pipeline still runs end to end on the local model, so a missing API key
+        # degrades the output instead of breaking startup.
+        try:
+            self.extraction_agent = ObligationExtractionAgent()
+        except Exception as exc:
+            logger.warning(f"LLM extraction agent unavailable ({exc}); local model only")
+            self.extraction_agent = None
         self.diff_agent = SemanticDiffAgent(self.graph)
         self.impact_engine = ImpactPropagationEngine(self.graph)
         self.mapping_agent = ComplianceMappingAgent(self.graph)
@@ -47,6 +61,8 @@ class RegGraphOrchestrator:
         # Cache for post-pipeline data
         self._compliance_actions: List = []
         self._last_copilot_summary: Optional[Dict] = None
+        self._last_pre_ai: Optional[Dict] = None
+        self._last_ai_insights: Optional[Dict] = None
     
     def process_circular(
         self,
@@ -78,21 +94,56 @@ class RegGraphOrchestrator:
         logger.info(f"Processing circular {circular_id}: {circular_title}")
 
         try:
-            # Step 1: Extract obligations
+            # Step 0: Local analysis — recognition + statistics, before any LLM call.
+            logger.info("Step 0: Local document intelligence...")
+            t0 = time.perf_counter()
+            pre_ai = self._pre_ai_analysis(
+                circular_text, circular_id, circular_title, intermediary_types, pages
+            )
+            pre_ai_seconds = round(time.perf_counter() - t0, 3)
+            recognition = pre_ai.get("recognition", {})
+            logger.info(
+                f"Local analysis in {pre_ai_seconds}s — {recognition.get('verdict', 'n/a')}"
+            )
+            log_event(
+                "LOCAL_ANALYSIS_COMPLETE", circular_id,
+                {"verdict": recognition.get("verdict"),
+                 "family": recognition.get("family"),
+                 "obligations_detected": pre_ai.get("summary_metrics", {}).get(
+                     "obligations_detected", 0),
+                 "seconds": pre_ai_seconds},
+            )
+
+            # Step 1: Extract obligations (local model first, LLM as an enrichment pass)
             logger.info("Step 1: Extracting obligations...")
             t0 = time.perf_counter()
-            new_obligations = self.extraction_agent.extract_obligations(
+            new_obligations, extraction_meta = self._extract_hybrid(
                 circular_text, circular_id, circular_title, intermediary_types
             )
             extraction_seconds = round(time.perf_counter() - t0, 3)
-            chunks_processed = max(1, len(circular_text) // 3000)
-            logger.info(f"Extracted {len(new_obligations)} obligations in {extraction_seconds}s")
+            chunks_processed = extraction_meta.get("chunks_total", 0) or 1
+            chunks_failed = extraction_meta.get("chunks_failed", 0)
+            llm_error = extraction_meta.get("llm_error")
+            logger.info(
+                f"Extracted {len(new_obligations)} obligations in {extraction_seconds}s "
+                f"(mode={extraction_meta.get('mode')}, "
+                f"ml={extraction_meta.get('ml_count')}, llm={extraction_meta.get('llm_count')})"
+            )
+
+            if llm_error:
+                logger.warning(f"LLM enrichment degraded: {llm_error}")
 
             log_event(
                 "EXTRACTION_COMPLETE", circular_id,
                 {"obligations_extracted": len(new_obligations),
                  "seconds": extraction_seconds,
-                 "chunks": chunks_processed},
+                 "mode": extraction_meta.get("mode"),
+                 "ml_obligations": extraction_meta.get("ml_count"),
+                 "llm_obligations": extraction_meta.get("llm_count"),
+                 "chunks": chunks_processed,
+                 "chunks_failed": chunks_failed,
+                 "llm_error": llm_error},
+                status="success" if not llm_error else "partial",
             )
 
             # Add to retrieval index
@@ -191,16 +242,23 @@ class RegGraphOrchestrator:
                     unique_actions.append(a)
             self._compliance_actions = unique_actions   # cache for API access
 
-            # Enrich SOPs on actions using LLM (with per-intermediary context)
+            # Enrich SOPs on actions. LLM-generated SOPs cost one extra call per
+            # obligation, which dominates runtime and burns the daily quota, so
+            # they are opt-in via ENABLE_LLM_SOP; otherwise use the template path.
             obl_map = {o.obligation_id: o for o in new_obligations}
             # Determine primary intermediary type for SOP context
             primary_intermediary = (intermediary_types or [None])[0]
+            use_llm_sop = get_settings().ENABLE_LLM_SOP
+            logger.info(
+                f"Generating SOPs for {len(unique_actions)} actions "
+                f"({'LLM' if use_llm_sop else 'template'} mode)"
+            )
             for action in unique_actions:
                 obl = obl_map.get(action.obligation_id)
                 if obl:
                     action.steps = generate_sop(
                         obl,
-                        use_llm=True,
+                        use_llm=use_llm_sop,
                         intermediary_type=primary_intermediary,
                     )
 
@@ -220,6 +278,51 @@ class RegGraphOrchestrator:
                 compliance_scores=compliance_scores,
             )
             self._last_copilot_summary = copilot_summary
+
+            # Step 6e: AI insight layer — narrative grounded on the local analysis
+            ai_insights = {"available": False, "error": "disabled"}
+            if get_settings().ENABLE_AI_INSIGHTS:
+                logger.info("Step 6e: Generating AI insights...")
+                ai_insights = generate_ai_insights(
+                    circular_id=circular_id,
+                    circular_title=circular_title,
+                    pre_ai=pre_ai,
+                    obligations=new_obligations,
+                    diff_summary={
+                        "new": len(diff_result.new_obligations),
+                        "modified": len(diff_result.modified_obligations),
+                        "superseded": len(diff_result.superseded_obligations),
+                        "affected_downstream": affected_count,
+                    },
+                )
+            self._last_ai_insights = ai_insights
+            self._last_pre_ai = pre_ai
+            log_event(
+                "AI_INSIGHTS", circular_id,
+                {"available": ai_insights.get("available"),
+                 "error": ai_insights.get("error")},
+                status="success" if ai_insights.get("available") else "partial",
+            )
+
+            # Step 6f: Index the circular for the chat agent
+            try:
+                get_chat_agent().index_circular(
+                    circular_id=circular_id,
+                    title=circular_title,
+                    text=circular_text,
+                    obligations=new_obligations,
+                    metrics={
+                        "summary_metrics": pre_ai.get("summary_metrics", {}),
+                        "recognition": pre_ai.get("recognition", {}),
+                        "diff": {
+                            "new": len(diff_result.new_obligations),
+                            "modified": len(diff_result.modified_obligations),
+                            "superseded": len(diff_result.superseded_obligations),
+                        },
+                    },
+                )
+            except Exception as exc:
+                logger.warning(f"Chat indexing failed for {circular_id}: {exc}")
 
             # Step 7: Save state
             logger.info("Step 7: Saving state...")
@@ -255,7 +358,10 @@ class RegGraphOrchestrator:
                 "CIRCULAR_PROCESSING_COMPLETE", circular_id,
                 {"total_seconds": total_seconds,
                  "obligations_extracted": len(new_obligations),
+                 "chunks_failed": chunks_failed,
+                 "llm_error": llm_error,
                  "risk_level": impact_report.risk_level},
+                status="success" if not chunks_failed else "partial",
             )
 
             logger.info(f"Circular processing complete for {circular_id} in {total_seconds}s")
@@ -273,6 +379,14 @@ class RegGraphOrchestrator:
                 'compliance_scores': compliance_scores,
                 'graph_stats': self.graph.get_statistics(),
                 'metrics': metrics_record,
+                'chunks_total': chunks_processed,
+                'chunks_failed': chunks_failed,
+                'llm_error': llm_error,
+                # Local (pre-LLM) intelligence and the AI layer built on top of it
+                'pre_ai_insights': pre_ai,
+                'recognition': recognition,
+                'ai_insights': ai_insights,
+                'extraction_meta': extraction_meta,
             }
 
         except Exception as exc:
@@ -286,6 +400,105 @@ class RegGraphOrchestrator:
             raise
 
     
+    # ── Extraction strategy ──────────────────────────────────────────────────
+
+    def _pre_ai_analysis(
+        self,
+        circular_text: str,
+        circular_id: str,
+        circular_title: str,
+        intermediary_types: Optional[List[str]],
+        pages: int,
+    ) -> Dict[str, Any]:
+        """Deterministic analysis. Never raises — a broken model must not block a run."""
+        try:
+            return ml_insights.analyze(
+                circular_text, pages=pages, circular_id=circular_id,
+                circular_title=circular_title, intermediary_types=intermediary_types,
+                threshold=get_settings().ML_OBLIGATION_THRESHOLD,
+            )
+        except Exception as exc:
+            logger.warning(f"Local analysis failed: {exc}")
+            return {"error": str(exc), "model_available": RegGraphModel.available()}
+
+    def _extract_hybrid(
+        self,
+        circular_text: str,
+        circular_id: str,
+        circular_title: str,
+        intermediary_types: Optional[List[str]],
+    ) -> tuple[List[Obligation], Dict[str, Any]]:
+        """
+        Run the local model, then optionally the LLM, and merge.
+
+        EXTRACTION_MODE controls the strategy:
+          hybrid (default) — local model always runs; LLM enriches when reachable
+          ml               — local model only (offline, deterministic, free)
+          llm              — LLM only (the original behaviour)
+
+        In hybrid mode an LLM failure is recorded but does not fail the run, which
+        is the whole point: a circular still produces obligations when the provider
+        is down or the daily quota is spent.
+        """
+        settings = get_settings()
+        mode = (settings.EXTRACTION_MODE or "hybrid").lower()
+        meta: Dict[str, Any] = {"mode": mode, "ml_count": 0, "llm_count": 0,
+                                "chunks_total": 0, "chunks_failed": 0, "llm_error": None}
+
+        ml_obligations: List[Obligation] = []
+        if mode in ("hybrid", "ml"):
+            if RegGraphModel.available():
+                try:
+                    ml_obligations, diag = extract_obligations_ml(
+                        circular_text, circular_id, circular_title,
+                        intermediary_types=intermediary_types,
+                        threshold=settings.ML_OBLIGATION_THRESHOLD,
+                    )
+                    meta["ml_count"] = len(ml_obligations)
+                    meta["ml_diagnostics"] = diag
+                except Exception as exc:
+                    logger.warning(f"Local extraction failed: {exc}")
+                    meta["ml_error"] = str(exc)
+            else:
+                meta["ml_error"] = "No trained model — run scripts/train_model.py"
+                logger.warning(meta["ml_error"])
+
+        llm_obligations: List[Obligation] = []
+        if mode in ("hybrid", "llm") and self.extraction_agent is not None:
+            try:
+                llm_obligations = self.extraction_agent.extract_obligations(
+                    circular_text, circular_id, circular_title, intermediary_types
+                )
+                meta["llm_count"] = len(llm_obligations)
+                meta["chunks_total"] = getattr(self.extraction_agent, "chunks_total", 0)
+                meta["chunks_failed"] = getattr(self.extraction_agent, "chunks_failed", 0)
+                meta["llm_error"] = getattr(self.extraction_agent, "last_error", None)
+            except Exception as exc:
+                meta["llm_error"] = str(exc)
+                meta["chunks_total"] = getattr(self.extraction_agent, "chunks_total", 0)
+                meta["chunks_failed"] = getattr(self.extraction_agent, "chunks_failed", 0)
+                # In llm-only mode there is no fallback, so the failure is fatal.
+                if mode == "llm" or not ml_obligations:
+                    if not ml_obligations:
+                        raise
+        elif mode == "llm" and self.extraction_agent is None:
+            raise RuntimeError("EXTRACTION_MODE=llm but the LLM client is not configured")
+
+        obligations, merge_meta = merge_obligation_sets(
+            ml_obligations, llm_obligations, circular_id
+        )
+        meta["merge"] = merge_meta
+
+        # Relationships: the LLM pass sets them when it runs; otherwise link locally
+        # so the graph still has edges to propagate impact along.
+        if not any(o.related_obligations for o in obligations):
+            obligations = link_by_similarity(obligations)
+            meta["relationships"] = "tfidf_similarity"
+        else:
+            meta["relationships"] = "llm"
+
+        return obligations, meta
+
     def _generate_impact_report(
         self,
         circular_id: str,
@@ -462,6 +675,14 @@ class RegGraphOrchestrator:
         """Return last copilot summary generated."""
         return getattr(self, "_last_copilot_summary", None)
 
+    def get_pre_ai_insights(self) -> Optional[Dict]:
+        """Local (pre-LLM) analysis from the last pipeline run."""
+        return getattr(self, "_last_pre_ai", None)
+
+    def get_ai_insights(self) -> Optional[Dict]:
+        """LLM insight layer from the last pipeline run."""
+        return getattr(self, "_last_ai_insights", None)
+
     def get_urgency_queue(self, intermediary_type: Optional[str] = None) -> List[Dict]:
         """
         Return obligations sorted by risk score descending (Tier 2A).
@@ -476,7 +697,10 @@ class RegGraphOrchestrator:
 
         queue = []
         for o in all_obls:
-            dep_count = len(list(self.graph.graph.successors(o.obligation_id)))
+            dep_count = (
+                len(list(self.graph.graph.successors(o.obligation_id)))
+                if self.graph.graph.has_node(o.obligation_id) else 0
+            )
             score, label = compute_risk_score(o, dep_count)
             days = _compute_days_remaining(o.deadline, o.deadline_type)
             queue.append({
