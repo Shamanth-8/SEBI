@@ -57,28 +57,38 @@ circular.pdf
      │
      ▼
 ┌─────────────────────────────────────────────────────┐
-│               7-Step Agent Pipeline                 │
+│  0. LOCAL MODEL  (no network, ~1s)                  │
+│     recognise document ──► is this a SEBI circular? │
+│     classify sentences     which family? novel?     │
+│     extract obligations    severity · deadline ·    │
+│     deterministic insights owner · evidence         │
+│                                                     │
+│  ── everything below enriches these results ──      │
 │                                                     │
 │  1. PDF Extraction  (pdfplumber)                    │
-│  2. Extraction Agent  ──► Claude/Mistral via        │
-│     chunks circular        OpenRouter               │
-│     extracts obligations                            │
-│  3. Semantic Diff Agent ──► classifies NEW /        │
-│     compares against        MODIFIED /              │
-│     existing graph          SUPERSEDED              │
+│  2. Extraction Agent  ──► LLM via OpenRouter,       │
+│     merged with the local  agreement raises         │
+│     model's obligations    confidence               │
+│  3. Semantic Diff Agent ──► NEW / MODIFIED /        │
+│     LLM, falling back to    SUPERSEDED, naming      │
+│     lexical TF-IDF diff     the changed field       │
 │  4. Graph Integration ──► NetworkX directed graph   │
-│     adds nodes + edges      obligation_graph.pkl    │
 │  5. Impact Propagation ──► BFS traversal            │
-│     finds all downstream    affected obligations    │
-│  6. Compliance Mapping ──► per intermediary type    │
-│     action items per role   evidence gap detection  │
+│  6. Compliance Mapping ──► action items + SOPs      │
+│  6e. AI Insights ──► narrative grounded on the      │
+│     numbers computed in step 0                      │
 │  7. Audit + Metrics ──► audit_log.json              │
-│     timestamps every step   metrics.json            │
 └─────────────────────────────────────────────────────┘
      │
      ▼
 FastAPI Backend (port 8000) + Streamlit Dashboard (port 8501)
 ```
+
+**Why step 0 exists.** The pipeline used to be LLM-only, so an unreachable provider
+or a spent free-tier quota meant zero obligations and an HTTP 502. The local model
+now carries the run on its own; the LLM improves the output when it is available
+and is never required for it. `EXTRACTION_MODE=ml` makes this explicit — the whole
+pipeline runs with no API key and no network.
 
 ---
 
@@ -101,28 +111,41 @@ FastAPI Backend (port 8000) + Streamlit Dashboard (port 8501)
 │       │   ├── graph.py               # graph stats + dependency analysis
 │       │   ├── evidence.py            # evidence upload + gap detection
 │       │   └── audit_api.py           # audit trail + pipeline metrics
-│       ├── graph/
-│       │   └── obligation_graph.py    # NetworkX graph wrapper
-│       ├── retrieval/
-│       │   └── faiss_search.py        # semantic similarity search
-│       ├── audit.py                   # audit logging to data/audit_log.json
-│       ├── metrics.py                 # pipeline performance metrics
-│       ├── anthropic_adapter.py       # OpenRouter ↔ Anthropic interface
+│       │   ├── chat.py                # RAG chat over a processed circular
+│       │   ├── intelligence.py        # local model: analyse / recognise / explain
+│       │   └── health.py              # LLM preflight + API key status
+│       ├── ml/                        # ← the local model (no network)
+│       │   ├── corpus.py              # synthetic SEBI corpus + ground-truth labels
+│       │   ├── pdf_render.py          # renders the corpus to SEBI-format PDFs
+│       │   ├── train.py               # fits and persists the estimator bundle
+│       │   ├── model.py               # inference + n-gram explainability
+│       │   ├── features.py            # deontic modality + structural features
+│       │   ├── extractor.py           # sentences → Obligation objects
+│       │   ├── severity.py            # rule-first severity assessment
+│       │   ├── insights.py            # deterministic pre-LLM document analysis
+│       │   └── textutil.py            # block/sentence segmentation
+│       ├── graph/obligation_graph.py  # NetworkX graph wrapper
+│       ├── retrieval/faiss_search.py  # semantic similarity search
+│       ├── anthropic_adapter.py       # OpenRouter ↔ Anthropic + key failover
 │       ├── config.py                  # env-based configuration
 │       └── main.py                    # FastAPI app + router registration
 ├── frontend/
-│   └── dashboard.py                   # Streamlit UI
-├── data/                              # auto-created, gitignored
+│   ├── dashboard.py                   # Streamlit UI
+│   └── intel_views.py                 # Document Intelligence + Chat pages
+├── scripts/
+│   ├── generate_corpus.py             # build the synthetic corpus PDFs
+│   ├── train_model.py                 # train the local model
+│   ├── evaluate_model.py              # precision/recall on held-out documents
+│   ├── demo_scenario.py               # the end-to-end regulatory scenario
+│   └── fetch_sebi_corpus.py           # download the real SEBI master circulars
+├── data/                              # gitignored — all of it regenerable
+│   ├── models/                        # trained bundle + model card
+│   ├── corpus/                        # synthetic circulars + ground_truth.json
+│   ├── sebi_corpus/                   # real SEBI master circulars
 │   ├── obligation_graph.pkl           # persisted NetworkX graph
-│   ├── faiss_index                    # semantic search index
-│   ├── audit_log.json                 # timestamped audit trail
-│   └── metrics.json                   # pipeline performance records
+│   └── audit_log.json                 # timestamped audit trail
 ├── circular.pdf                       # SEBI Master Circular (Surveillance)
-├── circular_extracted.json            # pre-extracted text from circular.pdf
-├── sebi_obligations_dataset.json      # 40 sample SEBI obligations
-├── extract_circular.py                # extract text from any PDF
-├── generate_demo_report.py            # generates demo_report.html
-├── demo_report.html                   # visual demo report
+├── RUN.md                             # setup and run commands
 ├── requirements.txt
 └── .env.example
 ```
@@ -142,57 +165,96 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure API key
+### 2. Build the corpus and train the local model
+
+Required — the offline extraction path needs it. Takes about 40 seconds.
+
+```bash
+venv/bin/python scripts/generate_corpus.py     # synthetic SEBI corpus → data/corpus/
+venv/bin/python scripts/train_model.py         # trains → data/models/
+venv/bin/python scripts/fetch_sebi_corpus.py   # real SEBI master circulars (optional)
+venv/bin/python scripts/evaluate_model.py      # verify: P/R on held-out documents
+```
+
+> Use `venv/bin/python`, never bare `python`. The model is version-locked to the
+> scikit-learn in the venv; loading it with a different one fails with an obscure
+> `AttributeError` from inside sklearn.
+
+### 3. Configure the API key (optional)
+
+Everything works without one — the LLM only enriches the local model's output.
 
 ```bash
 cp .env.example .env
-# Edit .env and set your OpenRouter key:
 # OPENROUTER_API_KEY=sk-or-v1-...
-# OPENROUTER_MODEL=mistralai/mistral-7b-instruct:free   # free tier
-# OPENROUTER_MODEL=anthropic/claude-3-sonnet             # best results
+# OPENROUTER_API_KEY_BACKUP=...       # switched to automatically on a 429
+# OPENROUTER_MODEL=openai/gpt-oss-20b:free
+# OPENROUTER_MODEL=anthropic/claude-3.5-sonnet   # best results, needs credit
 ```
 
-Get a free key at [openrouter.ai](https://openrouter.ai)
+Get a free key at [openrouter.ai](https://openrouter.ai). The free tier allows
+**50 requests/day per account** — extra keys on the same account share that limit.
 
-### 3. Start the backend
+To run with no LLM at all, set `EXTRACTION_MODE=ml`.
+
+### 4. Start the backend
+
+Run from the project root — paths resolve relative to the working directory.
 
 ```bash
-PYTHONPATH=backend venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+PYTHONPATH=backend venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 4. Start the dashboard
+### 5. Start the dashboard
 
 ```bash
 venv/bin/streamlit run frontend/dashboard.py --server.port 8501
 ```
 
-### 5. Open in browser
+### 6. Open in browser
 
 | URL | Purpose |
 |-----|---------|
 | `http://localhost:8501` | Main dashboard |
 | `http://localhost:8000/docs` | Swagger API docs |
-| `demo_report.html` | Open locally — full pipeline report |
+| `http://localhost:8000/api/v1/health/llm` | LLM reachability + key status |
+
+### 7. See the regulatory scenario
+
+```bash
+venv/bin/python scripts/demo_scenario.py       # 6 seconds, no API key needed
+```
+
+A stockbroker complies with the surveillance circular, SEBI amends it, and the
+pipeline reports what changed (`deadline: 'within 30 days' → 'within 15 days'`),
+who is affected downstream, and the resulting tasks.
 
 ---
 
-## Running the pipeline on circular.pdf
+## Running it on a circular
+
+Drop a PDF on the **Document Intelligence** page for a local-only analysis (no
+API quota spent), or on **Upload Circular** for the full pipeline. Or use the API:
 
 ```bash
-# Option A — via API (recommended)
-python3 - << 'EOF'
-import json, httpx
-data = json.load(open("circular_extracted.json"))
-resp = httpx.post("http://localhost:8000/api/v1/circulars/upload",
-    json={"circular_id": data["circular_id"], "title": data["title"],
-          "document_text": data["full_text"], "intermediary_types": data["intermediary_types"]},
-    timeout=600)
-print(resp.json())
-EOF
-
-# Option B — extract from a new PDF first
-python3 extract_circular.py   # edit path inside the script
+curl -X POST http://localhost:8000/api/v1/circulars/upload-file \
+  -F "file=@data/sebi_corpus/master-circular-for-stock-brokers_94623.pdf" \
+  -F "circular_id=SEBI_MC_STOCKBROKERS_2025" \
+  -F "title=Master Circular for Stock Brokers" \
+  -F "intermediary_types=stockbroker"
 ```
+
+Files worth trying:
+
+| Path | What it demonstrates |
+|---|---|
+| `data/sebi_corpus/*.pdf` | the real SEBI master circulars |
+| `data/corpus/holdout/*.pdf` | circulars the model has never seen |
+| `data/corpus/negative/*.pdf` | non-circulars — should be rejected at 2–3% |
+| `circular.pdf` | the 38-page surveillance master circular |
+
+Demo the holdout and real files, not `data/corpus/*.pdf` — those are the model's
+own training data.
 
 ---
 
@@ -212,24 +274,35 @@ python3 extract_circular.py   # edit path inside the script
 | GET | `/api/v1/evidence/gaps` | All obligations missing evidence |
 | GET | `/api/v1/audit/trail` | Full timestamped audit log |
 | GET | `/api/v1/audit/metrics/latest` | Latest pipeline performance |
+| POST | `/api/v1/intel/analyze-file` | **Local model** — full analysis, no LLM |
+| POST | `/api/v1/intel/recognize` | Is this a SEBI circular? Which family? |
+| POST | `/api/v1/intel/explain` | Why the model classified a sentence that way |
+| GET | `/api/v1/intel/model` | Model card: corpus, held-out scores |
+| POST | `/api/v1/chat/ask` | Ask a question about a processed circular |
+| GET | `/api/v1/chat/circulars` | Circulars available to chat with |
+| GET | `/api/v1/copilot/pre-ai` | Deterministic analysis of the last run |
+| GET | `/api/v1/copilot/ai-insights` | LLM insight layer for the last run |
+| GET | `/api/v1/health/llm` | Provider reachability + API key status |
 
 Full interactive docs: `http://localhost:8000/docs`
 
 ---
 
-## What was extracted from circular.pdf
+## What the local model does on real SEBI text
 
-**Circular:** SEBI Master Circular on Surveillance of Securities Market  
-**Reference:** HO/43/15/12(3)2025-ISD-POD2/I/11734/2026  
-**Issued:** March 23, 2023 · **Last updated:** May 15, 2026  
-**Pages:** 38 · **Characters:** 52,844
+| Document | Pages | Recognition | Obligations | Time |
+|---|---|---|---|---|
+| Master Circular for Stock Brokers | 399 | circular ✅, topic outside trained families | 1,391 from 5,151 sentences | 7s |
+| Master Circular for Investment Advisers | 99 | circular ✅, topic outside trained families | 238 | 1s |
+| Master Circular on Surveillance (`circular.pdf`) | 38 | circular ✅ | 80 | <1s |
+| Employment contract / press release / manual | 1 | **rejected** at 2–3% | — | <1s |
 
-Sample obligations extracted by the pipeline:
-- Compliance with SCRA, SEBI Act by Stock Exchanges and Clearing Corporations — **HIGH**
-- Compliance with SEBI Act and Depositories Act by Depositories — **HIGH**
-- Prevent Circulation of Unauthenticated News or Rumours — **HIGH**
-- Trading Window Closure obligations for Designated Persons — **HIGH**
-- Financial Disincentives for Surveillance-Related Lapses at MIIs — **HIGH**
+Every obligation carries its confidence, the n-grams that drove the decision, and
+the rule that set its severity — inspect any of them via `POST /api/v1/intel/explain`.
+
+The "topic outside trained families" verdict is deliberate: the model was trained
+on five circular families and says so when a document is not one of them, rather
+than asserting a label it cannot support.
 
 ---
 
@@ -270,20 +343,31 @@ Sample obligations extracted by the pipeline:
 
 | Layer | Technology |
 |-------|-----------|
-| LLM | Claude (Anthropic) or Mistral via OpenRouter |
+| **Local model** | scikit-learn — TF-IDF (word 1-3 + char_wb 3-5) → logistic regression |
+| **Corpus generation** | reportlab (renders labelled SEBI-format circulars to PDF) |
+| LLM (enrichment only) | Claude / any OpenRouter model, with key failover |
 | Backend | FastAPI + Uvicorn |
-| Dashboard | Streamlit |
+| Dashboard | Streamlit + Plotly |
 | Graph | NetworkX (directed graph, BFS traversal) |
-| Semantic search | FAISS |
+| Semantic search | FAISS + TF-IDF cosine |
 | PDF parsing | pdfplumber |
 | Data models | Pydantic v2 |
-| Persistence | Pickle + JSON |
+| Persistence | joblib (model) + pickle/JSON (graph, audit) |
 
 ---
 
 ## Notes
 
-- The `data/` folder is gitignored — it's created automatically on first run
+- The `data/` folder is gitignored and entirely regenerable — `generate_corpus.py`
+  and `train_model.py` rebuild the corpus and model; `fetch_sebi_corpus.py` re-downloads
+  the SEBI circulars
 - `.env` is gitignored — never commit your API key
-- Use `mistralai/mistral-7b-instruct:free` for testing (free but less accurate)
-- Use `anthropic/claude-3-sonnet` for production (best extraction quality)
+- Run everything with `venv/bin/python`, from the project root. The model is
+  version-locked to the venv's scikit-learn, and data paths resolve relative to the
+  working directory
+- `mistralai/mistral-7b-instruct:free` was retired by OpenRouter (404). Working free
+  models as of Aug 2026: `openai/gpt-oss-20b:free`, `google/gemma-4-31b-it:free`
+- `anthropic/claude-3.5-sonnet` gives the best extraction quality (needs credit)
+- The free tier is 50 requests/day **per account** — one 400-page circular can spend
+  it. Set `OPENROUTER_API_KEY_BACKUP` to a key from a *different* account, or run
+  `EXTRACTION_MODE=ml`

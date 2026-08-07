@@ -123,3 +123,24 @@ build/
 local_config.py
 debug/
 *.pdf
+# circular.pdf is the reference corpus and IS tracked, despite *.pdf above
+!circular.pdf
+
+# ── Generated artefacts (regenerate, never commit) ───────────────────────────
+# Trained model bundle + model card — rebuilt by scripts/train_model.py.
+# (data/ is already ignored above; these make the intent explicit.)
+data/models/
+data/corpus/
+data/sebi_corpus/
+data/chat_index/
+*.joblib
+
+# Old one-off pipeline outputs, superseded by the live dashboard
+demo_report.html
+circular_extracted.json
+
+# Scratch/probe files
+_probe*.py
+*.orig
+*.rej
+.claude/
