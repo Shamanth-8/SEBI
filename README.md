@@ -247,6 +247,70 @@ who is affected downstream, and the resulting tasks.
 
 ---
 
+## Deploy
+
+Three routes, all from this one repo. Full detail and troubleshooting in [DEPLOY.md](DEPLOY.md).
+
+| Route | Dockerfile | Free tier fits? |
+|---|---|---|
+| **Hugging Face Spaces** | `Dockerfile` (combined) | Yes — 16 GB RAM, handles the 399-page master circular |
+| **Render, two services** | `Dockerfile.backend` + `Dockerfile.frontend` | Yes for the 38-page circular; see the memory note below |
+| **Render/Railway, one service** | `Dockerfile` (combined) | No — needs a paid ≥ 1 GB instance |
+
+### Render, as two services
+
+The combined image runs the API and dashboard in one container, which needs
+~740 MB and so cannot fit a free 512 MB instance. Splitting them gives each
+process its own instance — and gives you two public URLs.
+
+`frontend/` imports nothing from `backend/` and talks to the API purely over HTTP
+via `API_BASE_URL`, so this needs no application code changes.
+
+**1. Backend — deploy first, you need its URL.**
+
+- New → Web Service → connect this repo → Runtime **Docker**
+- **Dockerfile Path:** `Dockerfile.backend`
+- No environment variables required: the image ships with `EXTRACTION_MODE=ml`, so
+  it serves real results with no API key configured
+- First build takes ~5–10 minutes — it trains the local model into the image
+
+Note its URL, e.g. `https://sebi-api.onrender.com`.
+
+**2. Dashboard.**
+
+- Same repo, new Web Service → Runtime **Docker**
+- **Dockerfile Path:** `Dockerfile.frontend`
+- **Environment variable:** `API_BASE_URL` = `https://sebi-api.onrender.com/api/v1`
+
+The `/api/v1` suffix is required. Without it every request 404s, because the
+dashboard appends only the endpoint path (`/obligations`, `/circulars/upload`).
+
+This service's URL is the one to share.
+
+Do not set `PORT` on either service — Render injects it, and both images bind it.
+
+**Optional:** to enable the LLM enrichment layer, add `OPENROUTER_API_KEY` and set
+`EXTRACTION_MODE=hybrid` on the backend. It works without this, using the local model.
+
+### Memory on the free tier
+
+Measured RSS, matching the table in [DEPLOY.md](DEPLOY.md):
+
+| Service | Idle | Peak |
+|---|---|---|
+| Backend | 172 MB | 387 MB analysing a 38-page circular |
+| Dashboard | 45 MB | grows with rendered result size |
+
+The backend fits a free 512 MB instance for the 38-page surveillance circular with
+roughly 25% headroom. **The 399-page master circular will still OOM there** — the
+split isolates the two processes, it does not reduce parsing cost. Use Spaces for
+that document, or a paid ≥ 1 GB instance.
+
+Free services also sleep after 15 minutes idle, so the first request costs a 30–50s
+cold start on *both*. Open both URLs a few minutes before demoing.
+
+---
+
 ## Running it on a circular
 
 Drop a PDF on the **Document Intelligence** page for a local-only analysis (no

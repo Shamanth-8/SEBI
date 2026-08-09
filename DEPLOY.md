@@ -101,9 +101,35 @@ Streamlit adds ~350 MB. A 512 MB instance will be killed mid-upload.
 
 ### Render
 
+**One service (combined image).** Simplest, but needs paid capacity:
+
 - New → Web Service → connect the repo → Runtime: **Docker**
-- Instance type: **Standard** or larger (free/starter at 512 MB will OOM)
+- Instance type: **Standard** or larger (free/starter at 512 MB will OOM, because
+  the single container holds both processes — see the footprint table above)
 - No build or start command needed — the Dockerfile handles both
+
+**Two services (split images).** Fits the free tier by giving each process its own
+512 MB instance, and yields separate API and dashboard URLs:
+
+| | Service 1 | Service 2 |
+|---|---|---|
+| Dockerfile Path | `Dockerfile.backend` | `Dockerfile.frontend` |
+| Required env | none | `API_BASE_URL` = *Service 1 URL* + `/api/v1` |
+| Idle / peak RSS | 172 MB / 387 MB | 45 MB / grows with result size |
+
+Deploy Service 1 first — Service 2 needs its URL. Leave `PORT` unset on both;
+Render injects it and both images bind it.
+
+The `/api/v1` suffix on `API_BASE_URL` is required: the dashboard appends only the
+endpoint path, so omitting it 404s every request.
+
+`Dockerfile.frontend` installs `requirements-frontend.txt`, not `requirements.txt` —
+the dashboard imports none of the server or ML stack, and carrying it would defeat
+the point of splitting. When you add a dashboard dependency, add it to **both** files.
+
+This split does not reduce parsing cost: the backend still peaks at 387 MB on the
+38-page circular and will OOM on 512 MB with the 399-page master circular. Use
+Spaces for that one.
 
 ### Railway
 
