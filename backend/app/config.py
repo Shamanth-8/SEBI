@@ -94,10 +94,6 @@ class Settings:
     # llm    : LLM only (original behaviour; fails when the provider is down)
     EXTRACTION_MODE: str = os.getenv("EXTRACTION_MODE", "hybrid").lower()
     MODEL_DIR: str = os.getenv("MODEL_DIR", "./data/models")
-    # Hugging Face read token, for gated/private model + dataset pulls. Left
-    # blank when absent rather than raising: config.py is imported at startup,
-    # and EXTRACTION_MODE=ml is meant to run with no credentials at all.
-    HF_TOKEN: str = os.getenv("HF_TOKEN", "")
     # Probability above which a sentence is treated as an obligation. Lower =
     # higher recall and more noise; 0.55 was tuned against the real 38-page circular.
     ML_OBLIGATION_THRESHOLD: float = float(os.getenv("ML_OBLIGATION_THRESHOLD", "0.55"))
