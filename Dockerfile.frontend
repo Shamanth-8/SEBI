@@ -1,0 +1,40 @@
+# RegGraph — dashboard only, for splitting across two free Render services.
+#
+# Deploy as Render Service 2, with "Dockerfile Path" set to Dockerfile.frontend.
+# REQUIRED env var: API_BASE_URL = Service 1's public URL + /api/v1
+#   e.g. https://sebi-api.onrender.com/api/v1
+# Without it the dashboard falls back to http://localhost:8000/api/v1 and every
+# request fails, since the API is a separate service here.
+FROM python:3.11-slim
+
+RUN useradd -m -u 1000 user \
+ && mkdir -p /home/user/app \
+ && chown -R user:user /home/user
+
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /home/user/app
+
+# Dashboard-only deps. Installing the full requirements.txt here would pull the
+# entire server + ML stack into a container that never imports any of it.
+COPY --chown=user requirements-frontend.txt .
+USER user
+RUN pip install --no-cache-dir --user -r requirements-frontend.txt
+
+COPY --chown=user frontend/ ./frontend/
+
+# Render injects $PORT and requires the process to bind it — no fixed PORT here.
+EXPOSE 8501
+
+# enableCORS/enableXsrf are disabled because Render terminates TLS at its proxy;
+# leaving them on makes Streamlit reject the forwarded requests.
+CMD ["sh", "-c", "streamlit run frontend/dashboard.py \
+  --server.port ${PORT:-8501} \
+  --server.address 0.0.0.0 \
+  --server.headless true \
+  --server.enableCORS false \
+  --server.enableXsrfProtection false \
+  --server.fileWatcherType none \
+  --browser.gatherUsageStats false"]

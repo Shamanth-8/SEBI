@@ -1,0 +1,73 @@
+# RegGraph — API only, for splitting across two free Render services.
+#
+# Deploy as Render Service 1, with "Dockerfile Path" set to Dockerfile.backend.
+# The combined ./Dockerfile is unchanged and still works for single-container
+# hosts (HF Spaces, Fly, a VM). This file is that one minus the dashboard.
+FROM python:3.11-slim
+
+# System deps for pdfplumber (pdfminer uses native libs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpoppler-cpp-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Own every path the app writes before switching user: WORKDIR creates missing
+# directories as the *current* user, so doing this afterwards leaves a
+# root-owned tree that UID 1000 cannot write.
+RUN useradd -m -u 1000 user \
+ && mkdir -p /home/user/app \
+ && chown -R user:user /home/user
+
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /home/user/app
+
+# Dependencies first so the layer caches across code changes
+COPY --chown=user requirements.txt .
+USER user
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# No frontend/ here — that is Service 2's image.
+COPY --chown=user backend/  ./backend/
+COPY --chown=user scripts/  ./scripts/
+
+ENV PYTHONPATH=$HOME/app/backend
+
+# Build the corpus and train the local model INTO THE IMAGE. Without this the
+# container starts with no model and the offline extraction path is dead.
+RUN python scripts/generate_corpus.py \
+ && python scripts/train_model.py \
+ && python -c "import sys; sys.path.insert(0,'backend'); \
+from app.ml.model import RegGraphModel; \
+m = RegGraphModel.load(); \
+print('model self-check OK, version', m.version)"
+
+# Model and corpus live outside ./data so a mounted volume at ./data cannot hide
+# them (that mistake makes the offline path vanish with no error message).
+ENV MODEL_DIR=$HOME/app/models \
+    CORPUS_DIR=$HOME/app/corpus
+RUN mkdir -p "$MODEL_DIR" "$CORPUS_DIR" \
+ && cp -r data/models/. "$MODEL_DIR"/ \
+ && cp -r data/corpus/. "$CORPUS_DIR"/ \
+ && rm -rf data/models \
+ && mkdir -p data
+
+ENV DATA_DIR=$HOME/app/data \
+    FAISS_INDEX_PATH=$HOME/app/data/faiss_index \
+    GRAPH_DB_PATH=$HOME/app/data/obligation_graph.pkl \
+    LOG_LEVEL=INFO
+
+# Local model first, LLM as enrichment: the service returns useful results with
+# no API key set. Override to "hybrid" once a key is set in Render's env vars.
+ENV EXTRACTION_MODE=ml \
+    ENABLE_AI_INSIGHTS=false
+
+# Render injects $PORT and requires the process to bind it — no fixed PORT here.
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD python -c "import os,urllib.request; p=os.environ.get('PORT','8000'); urllib.request.urlopen('http://127.0.0.1:'+p+'/health', timeout=4)"
+
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
